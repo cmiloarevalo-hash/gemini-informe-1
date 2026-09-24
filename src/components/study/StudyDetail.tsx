@@ -12,12 +12,17 @@ import {
   MapPin,
   Calendar,
   Layers,
-  FileCheck,
   Search,
   Compass,
-  FileSpreadsheet
+  FileSpreadsheet,
+  UploadCloud,
+  AlertCircle,
+  Cpu,
+  RefreshCw,
+  Eye
 } from "lucide-react";
 import { DocumentItem } from "../documents/DocumentManager";
+import { PublicCredential } from "../config/AIProvidersConfig";
 
 interface AnalysisData {
   schemaVersion: string;
@@ -27,6 +32,7 @@ interface AnalysisData {
     id: string;
     type: string;
     originalValue: unknown;
+    normalizedValue?: unknown;
     explicitInDocument: boolean;
     evidence: Array<{
       id: string;
@@ -45,8 +51,21 @@ interface AnalysisData {
     fojas?: string;
     numero?: string;
     year?: string;
+    cbr?: string;
     status: string;
     previousTitleReference?: string;
+    evidence: Array<{
+      id: string;
+      fileName: string;
+      page: number | null;
+      originalText: string | null;
+    }>;
+  }>;
+  encumbrances?: Array<{
+    id: string;
+    type: string;
+    description: string;
+    status: string;
     evidence: Array<{
       id: string;
       fileName: string;
@@ -113,7 +132,9 @@ interface StudyDetailProps {
   analysis: AnalysisData | null;
   isAnalyzing: boolean;
   onBack: () => void;
-  onRunAnalysis: () => void;
+  onRunAnalysis: (params: { credentialId?: string; provider?: string; modelId?: string }) => void;
+  onUploadFiles: (files: FileList | File[]) => void;
+  credentials: PublicCredential[];
 }
 
 export const StudyDetail: React.FC<StudyDetailProps> = ({
@@ -122,7 +143,9 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
   analysis,
   isAnalyzing,
   onBack,
-  onRunAnalysis
+  onRunAnalysis,
+  onUploadFiles,
+  credentials
 }) => {
   const [activeTab, setActiveTab] = useState<
     | "resumen"
@@ -137,6 +160,38 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
     | "auditoria"
   >("resumen");
 
+  // AI Provider & Model selector state (Task 10)
+  const defaultCred = credentials.find((c) => c.status === "VERIFIED") || credentials[0];
+  const [selectedCredId, setSelectedCredId] = useState<string>(defaultCred?.id || "");
+  const [selectedModel, setSelectedModel] = useState<string>(defaultCred?.defaultModel || "gemini-3.6-flash");
+  const [viewingEvidenceFact, setViewingEvidenceFact] = useState<any | null>(null);
+
+  const selectedCred = credentials.find((c) => c.id === selectedCredId) || defaultCred;
+
+  const handleCredChange = (id: string) => {
+    setSelectedCredId(id);
+    const cred = credentials.find((c) => c.id === id);
+    if (cred) {
+      setSelectedModel(cred.defaultModel || "gemini-3.6-flash");
+    }
+  };
+
+  const handleTriggerAnalysis = () => {
+    if (documents.length === 0) return;
+    onRunAnalysis({
+      credentialId: selectedCred?.id,
+      provider: selectedCred?.provider,
+      modelId: selectedModel
+    });
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      onUploadFiles(e.target.files);
+      e.target.value = "";
+    }
+  };
+
   const tabs: Array<{ id: typeof activeTab; label: string; condition?: boolean }> = [
     { id: "resumen", label: "Resumen" },
     { id: "documentos", label: `Documentos (${documents.length})` },
@@ -145,10 +200,16 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
     { id: "cadena", label: "Cadena de Títulos", condition: study.moduleType === "TITLE_STUDY" },
     { id: "discrepancias", label: `Discrepancias (${analysis?.discrepancies.length || 0})` },
     { id: "vacios", label: `Vacíos Documentales (${analysis?.missingEvidence.length || 0})` },
-    { id: "topografia", label: "Topografía & Superficies", condition: study.moduleType === "TOPOGRAPHIC_STUDY" },
+    { id: "topografia", label: "Topografía & Deslindes", condition: study.moduleType === "TOPOGRAPHIC_STUDY" },
     { id: "informe", label: "Informe & Dictamen" },
-    { id: "auditoria", label: "Auditoría del Estudio" }
+    { id: "auditoria", label: "Auditoría Técnica" }
   ];
+
+  const canDownloadDocx =
+    analysis &&
+    analysis.executionManifest.schemaValidation === "PASS" &&
+    analysis.executionManifest.criticalReview === "PASS" &&
+    analysis.executionManifest.evidenceGate === "PASS";
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
@@ -177,22 +238,26 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
           </div>
         </div>
 
-        {/* Global Action Buttons */}
+        {/* Global Action Buttons: Subir antecedentes & DOCX */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={onRunAnalysis}
-            disabled={isAnalyzing || documents.length === 0}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition active:scale-95"
-          >
-            <Play className="h-3.5 w-3.5 fill-white" />
-            <span>{isAnalyzing ? "Ejecutando 12 Fases..." : "Analizar Expediente"}</span>
-          </button>
+          {/* Task 1: Visible action inside study detail */}
+          <label className="cursor-pointer flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold shadow-sm transition active:scale-95">
+            <UploadCloud className="h-4 w-4 text-indigo-400" />
+            <span>+ Subir antecedentes</span>
+            <input
+              type="file"
+              accept=".pdf,.docx,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png"
+              multiple
+              onChange={handleFileInputChange}
+              className="hidden"
+            />
+          </label>
 
-          {analysis && (
+          {analysis && canDownloadDocx && (
             <a
               href={`/api/studies/${study.id}/report/docx`}
               download
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/20 transition active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/20 transition active:scale-95"
             >
               <Download className="h-4 w-4" />
               <span>Descargar DOCX</span>
@@ -200,6 +265,91 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
           )}
         </div>
       </div>
+
+      {/* Task 10 & 11: AI Analysis Block */}
+      <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-indigo-400" />
+            <span className="text-xs font-bold text-white uppercase tracking-wider">Análisis IA:</span>
+          </div>
+
+          <div className="flex items-center gap-3 text-xs">
+            <div>
+              <span className="text-slate-400 text-[10px] block font-medium">Proveedor:</span>
+              <select
+                value={selectedCredId}
+                onChange={(e) => handleCredChange(e.target.value)}
+                disabled={isAnalyzing}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs font-medium focus:outline-none focus:border-indigo-500"
+              >
+                {credentials.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.alias} ({c.provider})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <span className="text-slate-400 text-[10px] block font-medium">Modelo:</span>
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                disabled={isAnalyzing}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs font-mono focus:outline-none focus:border-indigo-500"
+              >
+                {selectedCred?.availableModels?.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                )) || <option value="gemini-3.6-flash">gemini-3.6-flash</option>}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Trigger Button or Blocked Warning (Task 11) */}
+        <div className="flex items-center gap-3">
+          {documents.length === 0 ? (
+            <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>Incorpora al menos un antecedente antes de ejecutar el análisis.</span>
+            </div>
+          ) : (
+            <button
+              onClick={handleTriggerAnalysis}
+              disabled={isAnalyzing}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition active:scale-95"
+            >
+              {isAnalyzing ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <span>Analizando antecedentes...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="h-3.5 w-3.5 fill-white" />
+                  <span>Analizar antecedentes</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Task 21: Progress during analysis */}
+      {isAnalyzing && (
+        <div className="p-4 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 space-y-2 text-xs text-indigo-200 animate-pulse">
+          <div className="flex items-center gap-2 font-bold text-white">
+            <RefreshCw className="h-4 w-4 animate-spin text-indigo-400" />
+            <span>Ejecutando pipeline de análisis sobre documentos auténticos...</span>
+          </div>
+          <p className="text-[11px] text-slate-300 font-mono">
+            Fases: 01 Clasificación de bytes → 02 Extracción fáctica estricta → 03 Cadena de títulos → 04 Análisis cruzado → 05 Vacíos → 06 Revisión crítica → 07 Evidence Gate → 08 Reporte DOCX.
+          </p>
+        </div>
+      )}
 
       {/* Tabs Navigation Bar */}
       <div className="flex items-center gap-1.5 border-b border-slate-800 pb-2 overflow-x-auto">
@@ -229,11 +379,11 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div>
                   <p className="text-slate-400">Rol de Avalúo Fiscal:</p>
-                  <p className="text-white font-mono font-bold mt-1">{study.role || "Pendiente de acreditación"}</p>
+                  <p className="text-white font-mono font-bold mt-1">{study.role || "No consta en antecedentes"}</p>
                 </div>
                 <div>
                   <p className="text-slate-400">Comuna / Jurisdicción CBR:</p>
-                  <p className="text-white font-semibold mt-1">{study.commune || "Pendiente de acreditación"}</p>
+                  <p className="text-white font-semibold mt-1">{study.commune || "No consta en antecedentes"}</p>
                 </div>
                 <div>
                   <p className="text-slate-400">Documentos Custodiados:</p>
@@ -253,7 +403,7 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold">
                     <CheckCircle2 className="h-4 w-4" />
-                    <span>Análisis validado con éxito mediante modelo: {analysis.executionManifest.model}</span>
+                    <span>Análisis validado con modelo: {analysis.executionManifest.model}</span>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80">
@@ -278,30 +428,24 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
                 </div>
               ) : (
                 <p className="text-xs text-slate-400">
-                  El expediente no cuenta con un informe consolidado aún. Presione "Analizar Expediente" para iniciar
-                  la ejecución del pipeline de 12 fases.
+                  No se ha ejecutado el análisis pericial. Incorpora antecedentes y pulsa "Analizar antecedentes".
                 </p>
               )}
             </div>
           </div>
 
-          <div className="space-y-4">
-            <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3">
-              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Reglas de Integridad Activas</h4>
-              <ul className="text-xs text-slate-400 space-y-2">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                  <span>Cálculo determinista de SHA-256 sobre bytes reales.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                  <span>Evidence Gate bloquea afirmaciones sin página o cita.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                  <span>Ausencia ≠ Inexistencia de gravámenes.</span>
-                </li>
-              </ul>
+          <div className="space-y-6">
+            <div className="p-6 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3">
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Custodia Documental</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Cada documento aportado cuenta con hash SHA-256 inmutable calculado al ingreso. Ninguna afirmación es
+                admitida sin sustento material exacto.
+              </p>
+              <div className="pt-2">
+                <span className="text-[10px] font-mono text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded border border-indigo-500/20">
+                  {documents.length} documento(s) resguardado(s)
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -312,32 +456,34 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-900/40">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-900 border-b border-slate-800 text-slate-400 uppercase text-[10px]">
+              <thead className="bg-slate-900/90 border-b border-slate-800 text-slate-400 uppercase text-[10px]">
                 <tr>
                   <th className="py-3 px-4">Documento</th>
+                  <th className="py-3 px-4">MIME</th>
                   <th className="py-3 px-4">Páginas</th>
-                  <th className="py-3 px-4">Tamaño</th>
-                  <th className="py-3 px-4">SHA-256 Verificado</th>
+                  <th className="py-3 px-4">Hash SHA-256</th>
+                  <th className="py-3 px-4">Calidad</th>
                   <th className="py-3 px-4">Estado</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-300">
                 {documents.map((d) => (
-                  <tr key={d.id} className="hover:bg-slate-800/30">
+                  <tr key={d.id} className="hover:bg-slate-800/20">
                     <td className="py-3 px-4 font-semibold text-white flex items-center gap-2">
                       <FileText className="h-4 w-4 text-indigo-400" />
-                      {d.originalName}
+                      <span>{d.originalName}</span>
                     </td>
-                    <td className="py-3 px-4 font-mono">{d.pageCount ? `${d.pageCount} págs` : "N/C"}</td>
-                    <td className="py-3 px-4 font-mono">{(d.size / 1024).toFixed(1)} KB</td>
-                    <td className="py-3 px-4 font-mono text-[10px] text-slate-400">
-                      {d.sha256.slice(0, 16)}...{d.sha256.slice(-8)}
+                    <td className="py-3 px-4 font-mono text-slate-400">{d.mimeType}</td>
+                    <td className="py-3 px-4 font-mono">{d.pageCount || 1}</td>
+                    <td className="py-3 px-4 font-mono text-[11px] text-slate-400">
+                      {d.sha256.slice(0, 16)}...
                     </td>
                     <td className="py-3 px-4">
-                      <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono border border-emerald-500/20 font-bold">
-                        {d.status}
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono">
+                        {d.readingQuality || "UNKNOWN"}
                       </span>
                     </td>
+                    <td className="py-3 px-4 text-emerald-400 font-mono text-[10px]">{d.status}</td>
                   </tr>
                 ))}
               </tbody>
@@ -346,217 +492,234 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
         </div>
       )}
 
-      {/* Tab 3: Hechos */}
+      {/* Tab 3: Hechos (Task 20) */}
       {activeTab === "hechos" && (
-        <div className="space-y-3">
-          {!analysis ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para ver los hechos extraídos.</p>
+        <div className="space-y-4">
+          {!analysis || analysis.facts.length === 0 ? (
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+              No hay hechos extraídos. Ejecute el análisis para procesar los documentos.
+            </div>
           ) : (
-            analysis.facts.map((f) => (
-              <div key={f.id} className="p-4 rounded-2xl bg-slate-900/50 border border-slate-800 text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-indigo-400 font-bold">{f.id}</span>
-                  <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px]">
-                    {f.type}
-                  </span>
-                </div>
-                <p className="text-slate-100 font-medium">Valor Registral: {String(f.originalValue)}</p>
-                <div className="border-t border-slate-800/80 pt-2 text-[11px] text-slate-400">
-                  <span>Evidencias vinculadas: </span>
-                  <span className="font-mono text-indigo-300">{f.evidence.map((e) => e.id).join(", ")}</span>
-                </div>
-              </div>
-            ))
+            <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-900/40">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-900/90 border-b border-slate-800 text-slate-400 uppercase text-[10px]">
+                  <tr>
+                    <th className="py-3 px-4">Tipo</th>
+                    <th className="py-3 px-4">Valor Extraído</th>
+                    <th className="py-3 px-4">Documento Fuente</th>
+                    <th className="py-3 px-4">Página</th>
+                    <th className="py-3 px-4">Confianza</th>
+                    <th className="py-3 px-4">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                  {analysis.facts.map((f) => {
+                    const ev = f.evidence[0];
+                    return (
+                      <tr key={f.id} className="hover:bg-slate-800/20">
+                        <td className="py-3 px-4 font-mono font-bold text-indigo-400">{f.type}</td>
+                        <td className="py-3 px-4 font-semibold text-white">
+                          {typeof f.originalValue === "object"
+                            ? JSON.stringify(f.originalValue)
+                            : String(f.originalValue)}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300">{ev?.fileName || "No consta"}</td>
+                        <td className="py-3 px-4 font-mono text-slate-400">{ev?.page ? `Pág. ${ev.page}` : "N/C"}</td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono font-bold">
+                            {ev?.confidence || "HIGH"}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <button
+                            onClick={() => setViewingEvidenceFact(f)}
+                            className="flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold"
+                          >
+                            <Eye className="h-3 w-3" />
+                            <span>Ver fuente</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
 
       {/* Tab 4: Evidencias */}
       {activeTab === "evidencias" && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {!analysis ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para examinar la matriz de evidencias.</p>
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+              No hay matriz de evidencia generada aún.
+            </div>
           ) : (
-            analysis.facts.flatMap((f) =>
-              f.evidence.map((ev) => (
-                <div key={ev.id} className="p-4 rounded-2xl bg-slate-900/50 border border-slate-800 text-xs space-y-2">
+            <div className="space-y-3">
+              {analysis.facts.map((f) => (
+                <div key={f.id} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="font-mono text-emerald-400 font-bold">{ev.id}</span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {ev.fileName} • Pág. {ev.page ?? "N/C"}
+                    <span className="font-mono text-indigo-400 font-bold">{f.id} • {f.type}</span>
+                    <span className="text-slate-400 font-mono text-[10px]">
+                      {f.evidence.length} cita(s) verificable(s)
                     </span>
                   </div>
-                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 font-mono text-slate-300">
-                    "{ev.originalText}"
-                  </div>
+                  {f.evidence.map((ev, idx) => (
+                    <div key={idx} className="p-3 rounded-lg bg-slate-950 border border-slate-800/60 space-y-1">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span className="font-semibold text-slate-300">{ev.fileName} (Pág. {ev.page || "1"})</span>
+                        <span className="text-emerald-400 font-mono">{ev.confidence}</span>
+                      </div>
+                      <p className="text-slate-300 italic">"{ev.originalText}"</p>
+                    </div>
+                  ))}
                 </div>
-              ))
-            )
+              ))}
+            </div>
           )}
         </div>
       )}
 
       {/* Tab 5: Cadena de Títulos */}
-      {activeTab === "cadena" && study.moduleType === "TITLE_STUDY" && (
-        <div className="space-y-3">
-          {!analysis || !analysis.titleChain ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para examinar el tracto sucesivo.</p>
+      {activeTab === "cadena" && (
+        <div className="space-y-4">
+          {!analysis || !analysis.titleChain || analysis.titleChain.length === 0 ? (
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+              No se han detectado eslabones de dominio en los antecedentes analizados.
+            </div>
           ) : (
-            analysis.titleChain.map((link, idx) => (
-              <div
-                key={link.id}
-                className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 flex items-start gap-4 text-xs"
-              >
-                <div className="h-8 w-8 rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0">
-                  {idx + 1}
-                </div>
-                <div className="flex-1 space-y-1">
+            <div className="space-y-3">
+              {analysis.titleChain.map((link, idx) => (
+                <div key={link.id || idx} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2 text-xs">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-white text-sm">{link.titleType}</h4>
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                        link.status === "CONFIRMED_LINK"
-                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                          : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                      }`}
-                    >
+                    <h4 className="font-bold text-white text-sm">
+                      Eslabón {idx + 1}: {link.titleType}
+                    </h4>
+                    <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 font-mono text-[10px] font-bold">
                       {link.status}
                     </span>
                   </div>
-                  {link.seller && <p className="text-slate-400">Tradente: <span className="text-slate-200">{link.seller}</span></p>}
-                  {link.buyer && <p className="text-slate-400">Adquirente: <span className="text-slate-200">{link.buyer}</span></p>}
-                  {link.fojas && (
-                    <p className="text-slate-400">
-                      Inscripción: <span className="text-slate-200">Fojas {link.fojas} N° {link.numero} ({link.year})</span>
-                    </p>
-                  )}
-                  {link.previousTitleReference && (
-                    <p className="text-amber-400/90 text-[11px] font-mono">
-                      Cita título previo: {link.previousTitleReference}
-                    </p>
-                  )}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-400 pt-1">
+                    <div>Vendedor: <strong className="text-slate-200 block">{link.seller || "No consta"}</strong></div>
+                    <div>Comprador: <strong className="text-slate-200 block">{link.buyer || "No consta"}</strong></div>
+                    <div>Inscripción CBR: <strong className="text-slate-200 block">Fs. {link.fojas || "-"} N° {link.numero || "-"} ({link.year || "-"})</strong></div>
+                    <div>CBR: <strong className="text-slate-200 block">{link.cbr || "No consta"}</strong></div>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
       )}
 
       {/* Tab 6: Discrepancias */}
       {activeTab === "discrepancias" && (
-        <div className="space-y-3">
-          {!analysis ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para detectar discrepancias entre fuentes.</p>
-          ) : analysis.discrepancies.length === 0 ? (
-            <div className="p-8 text-center border border-dashed border-slate-800 rounded-2xl">
-              <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2" />
-              <p className="text-xs text-slate-300 font-semibold">No se detectaron discrepancias entre fuentes</p>
+        <div className="space-y-4">
+          {!analysis || analysis.discrepancies.length === 0 ? (
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-emerald-400/80 text-xs">
+              No se han detectado discrepancias materiales en los antecedentes examinados.
             </div>
           ) : (
-            analysis.discrepancies.map((d, i) => (
-              <div key={i} className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-start gap-2.5">
-                <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
-                <span>{d}</span>
-              </div>
-            ))
+            <div className="space-y-2">
+              {analysis.discrepancies.map((d, idx) => (
+                <div key={idx} className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-400" />
+                  <span>{d}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
 
       {/* Tab 7: Vacíos Documentales */}
       {activeTab === "vacios" && (
-        <div className="space-y-3">
-          {!analysis ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para verificar vacíos de antecedentes.</p>
-          ) : analysis.missingEvidence.length === 0 ? (
-            <p className="text-xs text-slate-400">No se constataron vacíos documentales.</p>
+        <div className="space-y-4">
+          {!analysis || analysis.missingEvidence.length === 0 ? (
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+              No se constataron vacíos de títulos indispensables en el tracto analizado.
+            </div>
           ) : (
-            analysis.missingEvidence.map((m, i) => (
-              <div key={i} className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 flex items-start gap-2.5">
-                <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
-                <span>{m}</span>
-              </div>
-            ))
+            <div className="space-y-2">
+              {analysis.missingEvidence.map((m, idx) => (
+                <div key={idx} className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 flex items-start gap-2">
+                  <span className="h-2 w-2 rounded-full bg-rose-400 mt-1.5 shrink-0" />
+                  <span>{m}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
 
       {/* Tab 8: Topografía */}
-      {activeTab === "topografia" && study.moduleType === "TOPOGRAPHIC_STUDY" && (
-        <div className="space-y-6">
-          {!analysis || !analysis.topography ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para ver los cálculos topográficos.</p>
+      {activeTab === "topografia" && (
+        <div className="space-y-4">
+          {!analysis?.topography ? (
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+              No se registran datos topográficos calculados.
+            </div>
           ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                  <p className="text-xs text-slate-400">Perímetro Calculado (Suma Tramos)</p>
-                  <p className="text-xl font-bold text-white font-mono mt-1">
+                  <p className="text-slate-400 text-[10px]">Perímetro Total Calculado:</p>
+                  <p className="text-xl font-mono font-bold text-white mt-1">
                     {analysis.topography.perimeterMetersCalculated} m
                   </p>
                 </div>
                 <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                  <p className="text-xs text-slate-400">Diferencia Título vs Terreno</p>
-                  <p className="text-xl font-bold text-indigo-400 font-mono mt-1">
+                  <p className="text-slate-400 text-[10px]">Discrepancia Máxima Superficie:</p>
+                  <p className="text-xl font-mono font-bold text-emerald-400 mt-1">
                     {analysis.topography.maxSurfaceDiscrepancyPercentage}%
                   </p>
                 </div>
-                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                  <p className="text-xs text-slate-400">Tolerancia Legal (≤ 2.0%)</p>
-                  <p className="text-xl font-bold text-emerald-400 font-mono mt-1">
-                    {analysis.topography.isWithinAcceptableTolerance ? "ADMISIBLE" : "EXCEDE LÍMITE"}
-                  </p>
-                </div>
               </div>
-
-              <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 text-xs space-y-3">
-                <h4 className="font-bold text-white uppercase tracking-wider">Superficies Cotejadas</h4>
-                {analysis.topography.surfaces.map((s, idx) => (
-                  <div key={idx} className="flex justify-between items-center p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono">
-                    <span className="text-slate-400">{s.sourceType}</span>
-                    <span className="text-slate-200">Declarado: {s.statedValueRaw}</span>
-                    <span className="text-indigo-400 font-bold">{s.normalizedSquareMeters.toLocaleString("es-CL")} m²</span>
-                  </div>
-                ))}
-              </div>
-            </>
+            </div>
           )}
         </div>
       )}
 
       {/* Tab 9: Informe */}
       {activeTab === "informe" && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {!analysis ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para generar el informe oficial.</p>
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+              El informe estará disponible una vez ejecutado y validado el análisis.
+            </div>
           ) : (
-            <>
-              {/* Findings */}
-              <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3 text-xs">
-                <h4 className="font-bold text-white uppercase tracking-wider">Hallazgos Técnicos</h4>
-                {analysis.findings.map((f) => (
-                  <div key={f.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-start gap-2">
-                    <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 font-mono text-[10px] font-bold shrink-0">
-                      {f.category}
-                    </span>
-                    <span className="text-slate-200">{f.statement}</span>
-                  </div>
-                ))}
+            <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-6">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                <div>
+                  <h3 className="text-base font-bold text-white">Dictamen Pericial y Conclusiones</h3>
+                  <p className="text-xs text-slate-400">Generado mediante trazabilidad estricta y evidencia auditada.</p>
+                </div>
+                {canDownloadDocx && (
+                  <a
+                    href={`/api/studies/${study.id}/report/docx`}
+                    download
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md transition"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Descargar DOCX</span>
+                  </a>
+                )}
               </div>
 
-              {/* Conclusions */}
-              <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 space-y-3 text-xs">
-                <h4 className="font-bold text-white uppercase tracking-wider">Conclusiones Dictaminadas</h4>
-                {analysis.conclusions.map((c) => (
-                  <div key={c.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-                    <p className="text-white font-medium">{c.text}</p>
+              <div className="space-y-3 text-xs">
+                {analysis.conclusions.map((c, idx) => (
+                  <div key={c.id || idx} className="p-4 rounded-xl bg-slate-950 border border-slate-800/80 space-y-1">
+                    <p className="font-bold text-white">Conclusión {idx + 1}:</p>
+                    <p className="text-slate-300 leading-relaxed">{c.text}</p>
                     <p className="text-[10px] text-slate-500 font-mono">
-                      Respaldada por hechos comprobados: {c.supportingFactIds.join(", ")}
+                      Respaldada por hechos: {c.supportingFactIds.join(", ")}
                     </p>
                   </div>
                 ))}
               </div>
-            </>
+            </div>
           )}
         </div>
       )}
@@ -564,14 +727,63 @@ export const StudyDetail: React.FC<StudyDetailProps> = ({
       {/* Tab 10: Auditoría */}
       {activeTab === "auditoria" && (
         <div className="space-y-4">
-          <h3 className="text-sm font-bold text-white">Execution Manifest Criptográfico</h3>
           {!analysis ? (
-            <p className="text-xs text-slate-500">Ejecute el análisis para ver el manifest inmutable.</p>
+            <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+              No hay manifiesto de ejecución pericial disponible.
+            </div>
           ) : (
-            <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 font-mono text-xs text-slate-300">
-              <pre className="overflow-x-auto">{JSON.stringify(analysis.executionManifest, null, 2)}</pre>
+            <div className="p-6 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-4 text-xs font-mono">
+              <h3 className="text-sm font-bold text-white uppercase font-sans">Manifiesto Inmutable de Ejecución</h3>
+              <div className="grid grid-cols-2 gap-3 text-slate-300 bg-slate-950 p-4 rounded-xl border border-slate-800">
+                <div>Modelo: <strong className="text-indigo-400">{analysis.executionManifest.model}</strong></div>
+                <div>Generado: {new Date(analysis.executionManifest.generatedAt).toLocaleString("es-CL")}</div>
+                <div>Schema Validation: <strong className="text-emerald-400">{analysis.executionManifest.schemaValidation}</strong></div>
+                <div>Critical Review: <strong className="text-emerald-400">{analysis.executionManifest.criticalReview}</strong></div>
+                <div>Evidence Gate: <strong className="text-emerald-400">{analysis.executionManifest.evidenceGate}</strong></div>
+                <div>Cobertura de Evidencia: <strong className="text-emerald-400">{analysis.executionManifest.evidenceCoverage}%</strong></div>
+              </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Modal: Ver Fuente (Task 20) */}
+      {viewingEvidenceFact && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h4 className="text-sm font-bold text-white">Cita Literal y Fuente Documental</h4>
+              <button
+                onClick={() => setViewingEvidenceFact(null)}
+                className="text-slate-400 hover:text-white text-xs font-bold"
+              >
+                Cerrar
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="text-slate-500 block text-[10px]">Hecho Evaluado:</span>
+                <span className="text-white font-semibold">{viewingEvidenceFact.type}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px]">Valor Fáctico:</span>
+                <span className="text-indigo-300 font-mono">
+                  {typeof viewingEvidenceFact.originalValue === "object"
+                    ? JSON.stringify(viewingEvidenceFact.originalValue)
+                    : String(viewingEvidenceFact.originalValue)}
+                </span>
+              </div>
+              <div className="pt-2 border-t border-slate-800 space-y-2">
+                <span className="text-slate-400 font-bold block">Citas Documentales Acreditadas:</span>
+                {viewingEvidenceFact.evidence.map((ev: any, idx: number) => (
+                  <div key={idx} className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                    <p className="text-slate-300 font-bold">{ev.fileName} (Pág. {ev.page || "1"})</p>
+                    <p className="text-slate-400 italic">"{ev.originalText}"</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

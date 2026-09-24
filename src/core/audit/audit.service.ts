@@ -6,10 +6,13 @@ import { Fact } from "../../schemas/fact.schema";
 export class AuditService {
   /**
    * Calculates factual coverage ratio accurately.
+   * With 0 facts: returns 0 (NOT_EXECUTED), never 100%.
    */
   public static calculateEvidenceCoverage(facts: Fact[]): number {
+    if (!facts || facts.length === 0) return 0;
+
     const documentedFacts = facts.filter((f) => f.evidence !== undefined);
-    if (documentedFacts.length === 0) return 100;
+    if (documentedFacts.length === 0) return 0;
 
     const withEvidence = documentedFacts.filter((f) => f.evidence.length > 0);
     return Math.round((withEvidence.length / documentedFacts.length) * 100);
@@ -28,6 +31,7 @@ export class AuditService {
     schemaValidationPass: boolean;
     criticalReviewPass: boolean;
     evidenceGatePass: boolean;
+    provider?: string;
   }): ExecutionManifest {
     const coverage = this.calculateEvidenceCoverage(params.facts);
     const hashes = params.documents.map((d) => d.sha256);
@@ -39,7 +43,7 @@ export class AuditService {
       commitSha: "f8a49c2",
       moduleId: params.moduleId,
       moduleVersion: "1.0.0",
-      provider: "google-gemini",
+      provider: params.provider || "google-gemini",
       model: params.model,
       promptVersion: "1.0.0",
       schemaVersion: "1.0.0",

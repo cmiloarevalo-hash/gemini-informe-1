@@ -7,12 +7,12 @@ import React, { useState, useEffect } from "react";
 import { Sidebar, NavigationPage } from "./components/layout/Sidebar";
 import { Header } from "./components/layout/Header";
 import { Dashboard } from "./components/dashboard/Dashboard";
-import { DocumentManager, DocumentItem } from "./components/documents/DocumentManager";
-import { AIProvidersConfig } from "./components/config/AIProvidersConfig";
+import { DocumentManager, DocumentItem, UploadProgressItem } from "./components/documents/DocumentManager";
+import { AIProvidersConfig, PublicCredential } from "./components/config/AIProvidersConfig";
 import { StudyDetail } from "./components/study/StudyDetail";
 import { GoogleIntegrationModal } from "./components/google/GoogleIntegrationModal";
 import { AuditCenter } from "./components/operation/AuditCenter";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 
 interface Study {
   id: string;
@@ -31,7 +31,13 @@ export default function App() {
   const [analysis, setAnalysis] = useState<any | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressItem[]>([]);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
+  // Credentials list from server
+  const [credentials, setCredentials] = useState<PublicCredential[]>([]);
+  const [activeModel, setActiveModel] = useState("gemini-3.6-flash");
+  const [activeProvider, setActiveProvider] = useState("Google Gemini");
 
   // Google Modal state
   const [showGoogleModal, setShowGoogleModal] = useState(false);
@@ -47,9 +53,10 @@ export default function App() {
   // Audit state
   const [auditBundle, setAuditBundle] = useState<Record<string, unknown> | null>(null);
 
-  // Load Studies & Audit Bundle on mount
+  // Load Studies, Credentials & Audit Bundle on mount
   useEffect(() => {
     fetchStudies();
+    fetchCredentials();
     fetchAuditBundle();
   }, []);
 
@@ -58,6 +65,9 @@ export default function App() {
     if (selectedStudy) {
       fetchDocuments(selectedStudy.id);
       fetchAnalysis(selectedStudy.id);
+    } else {
+      setDocuments([]);
+      setAnalysis(null);
     }
   }, [selectedStudy]);
 
@@ -69,6 +79,23 @@ export default function App() {
         setStudies(data);
         if (data.length > 0 && !selectedStudy) {
           setSelectedStudy(data[0]);
+        }
+      }
+    } catch {
+      //
+    }
+  };
+
+  const fetchCredentials = async () => {
+    try {
+      const res = await fetch("/api/providers");
+      if (res.ok) {
+        const data: PublicCredential[] = await res.json();
+        setCredentials(data);
+        const verified = data.find((c) => c.status === "VERIFIED") || data[0];
+        if (verified) {
+          setActiveModel(verified.defaultModel || "gemini-3.6-flash");
+          setActiveProvider(verified.alias || "Google Gemini");
         }
       }
     } catch {
@@ -145,51 +172,113 @@ export default function App() {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedStudy || !e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
+  // Multi-document file upload (Task 2)
+  const handleUploadFiles = async (filesToUpload: FileList | File[]) => {
+    if (!selectedStudy) {
+      setErrorBanner("Primero crea o selecciona un estudio para incorporar antecedentes.");
+      return;
+    }
+
+    const filesArray = Array.from(filesToUpload);
+    if (filesArray.length === 0) return;
+
     setIsUploading(true);
     setErrorBanner(null);
 
+    // Initialize progress tracker
+    const progressList: UploadProgressItem[] = filesArray.map((f) => ({
+      name: f.name,
+      size: f.size,
+      status: "UPLOADING"
+    }));
+    setUploadProgress(progressList);
+
     const formData = new FormData();
-    formData.append("file", file);
+    for (const f of filesArray) {
+      formData.append("files", f);
+    }
 
     try {
+      // Transition to PREPARING
+      setUploadProgress((prev) =>
+        prev.map((p) => ({ ...p, status: "PREPARING" }))
+      );
+
       const res = await fetch(`/api/studies/${selectedStudy.id}/documents`, {
         method: "POST",
         body: formData
       });
 
-      if (res.ok) {
-        const doc = await res.json();
-        setDocuments((prev) => [doc, ...prev]);
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        // Update document list without losing previously loaded files
+        const newDocs: DocumentItem[] = data.processed || [];
+        setDocuments((prev) => [...newDocs, ...prev]);
+
+        setUploadProgress((prev) =>
+          prev.map((p) => {
+            const err = data.errors?.find((e: any) => e.file === p.name);
+            if (err) {
+              return { ...p, status: "FAILED", message: err.error };
+            }
+            return { ...p, status: "READY_FOR_AI" };
+          })
+        );
+
+        if (data.errors && data.errors.length > 0) {
+          setErrorBanner(
+            `Algunos archivos no pudieron ser procesados: ${data.errors.map((e: any) => e.file).join(", ")}`
+          );
+        }
       } else {
-        const err = await res.json();
-        setErrorBanner(err.error || "Fallo en la carga del documento.");
+        const msg = data.error || "Fallo en la subida de documentos.";
+        setErrorBanner(msg);
+        setUploadProgress((prev) =>
+          prev.map((p) => ({ ...p, status: "FAILED", message: msg }))
+        );
       }
-    } catch {
-      setErrorBanner("Error de conexión al cargar archivo.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error de conexión al subir archivos.";
+      setErrorBanner(msg);
+      setUploadProgress((prev) =>
+        prev.map((p) => ({ ...p, status: "FAILED", message: msg }))
+      );
     } finally {
       setIsUploading(false);
-      e.target.value = "";
     }
   };
 
-  const handleRunAnalysis = async () => {
+  // Run Real Analysis (Task 10 & 11)
+  const handleRunAnalysis = async (params: { credentialId?: string; provider?: string; modelId?: string }) => {
     if (!selectedStudy) return;
+    if (documents.length === 0) {
+      setErrorBanner("Incorpora al menos un antecedente antes de ejecutar el análisis.");
+      return;
+    }
+
     setIsAnalyzing(true);
     setErrorBanner(null);
+
+    const modelToUse = params.modelId || activeModel || "gemini-3.6-flash";
+    setActiveModel(modelToUse);
 
     try {
       const res = await fetch(`/api/studies/${selectedStudy.id}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: "gemini-3.8-flash" })
+        body: JSON.stringify({
+          credentialId: params.credentialId,
+          provider: params.provider,
+          modelId: modelToUse
+        })
       });
 
       if (res.ok) {
         const result = await res.json();
         setAnalysis(result);
+        // Refresh documents in case reading quality or classifications updated
+        await fetchDocuments(selectedStudy.id);
       } else {
         const err = await res.json();
         setErrorBanner(err.error || "Error durante el análisis.");
@@ -290,31 +379,46 @@ export default function App() {
       case "mis-estudios":
         return (
           <div className="space-y-4 max-w-5xl mx-auto">
-            <h2 className="text-xl font-bold text-white">Mis Estudios Registrados</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {studies.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => {
-                    setSelectedStudy(s);
-                    setCurrentPage("detalle-estudio");
-                  }}
-                  className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 hover:border-indigo-500/40 cursor-pointer transition space-y-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-bold text-white">{s.name}</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
-                      {s.moduleType}
-                    </span>
-                  </div>
-                  <div className="text-xs text-slate-400 font-mono space-y-1">
-                    <p>Rol: {s.role || "No consta"}</p>
-                    <p>Comuna: {s.commune || "No consta"}</p>
-                    <p>Creado: {new Date(s.createdAt).toLocaleDateString("es-CL")}</p>
-                  </div>
-                </div>
-              ))}
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">Mis Estudios Registrados</h2>
+              <button
+                onClick={() => setShowNewModal(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md transition"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Nuevo Estudio</span>
+              </button>
             </div>
+            {studies.length === 0 ? (
+              <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+                No hay estudios registrados aún.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {studies.map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => {
+                      setSelectedStudy(s);
+                      setCurrentPage("detalle-estudio");
+                    }}
+                    className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 hover:border-indigo-500/40 cursor-pointer transition space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-white">{s.name}</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                        {s.moduleType}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-400 font-mono space-y-1">
+                      <p>Rol: {s.role || "No consta"}</p>
+                      <p>Comuna: {s.commune || "No consta"}</p>
+                      <p>Creado: {new Date(s.createdAt).toLocaleDateString("es-CL")}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         );
 
@@ -324,9 +428,12 @@ export default function App() {
           <DocumentManager
             documents={documents}
             isUploading={isUploading}
-            onUploadFile={handleFileUpload}
+            onUploadFiles={handleUploadFiles}
             onOpenDriveModal={() => setShowGoogleModal(true)}
+            studyId={selectedStudy?.id}
             studyName={selectedStudy?.name}
+            onCreateNewStudy={() => setShowNewModal(true)}
+            uploadProgress={uploadProgress}
           />
         );
 
@@ -340,13 +447,13 @@ export default function App() {
             <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4">
               <h2 className="text-lg font-bold text-white">Integraciones Google Workspace</h2>
               <p className="text-xs text-slate-400">
-                Configuración del conector Google Drive con alcance mínimo 'drive.file' para selección segura de documentos.
+                Estado técnico: ARCHITECTURE_READY / DEFERRED. Se integrará en la fase subsecuente.
               </p>
               <button
                 onClick={() => setShowGoogleModal(true)}
-                className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition"
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs transition border border-slate-700"
               >
-                Abrir Panel Google & Drive
+                Ver Estado de Integración Google
               </button>
             </div>
           </div>
@@ -368,10 +475,22 @@ export default function App() {
               isAnalyzing={isAnalyzing}
               onBack={() => setCurrentPage("mis-estudios")}
               onRunAnalysis={handleRunAnalysis}
+              onUploadFiles={handleUploadFiles}
+              credentials={credentials}
             />
           );
         }
-        return <p className="text-xs text-slate-500">Seleccione un estudio para ver su detalle.</p>;
+        return (
+          <div className="p-12 text-center text-slate-400 text-xs space-y-3">
+            <p>Primero crea o selecciona un estudio para ver su detalle.</p>
+            <button
+              onClick={() => setShowNewModal(true)}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs"
+            >
+              Crear Nuevo Estudio
+            </button>
+          </div>
+        );
 
       default:
         return (
@@ -396,17 +515,25 @@ export default function App() {
       <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-950">
         <Header
           pageTitle={currentPage}
-          activeProvider="Google Gemini"
-          activeModel="gemini-3.8-flash"
+          activeProvider={activeProvider}
+          activeModel={activeModel}
           isDriveConnected={isDriveConnected}
           onOpenGoogleModal={() => setShowGoogleModal(true)}
           onOpenSettings={() => setCurrentPage("proveedores-ia")}
         />
 
         {errorBanner && (
-          <div className="bg-rose-500/10 border-b border-rose-500/20 px-6 py-2.5 flex items-center gap-2 text-rose-400 text-xs shrink-0">
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <span>{errorBanner}</span>
+          <div className="bg-rose-500/10 border-b border-rose-500/20 px-6 py-2.5 flex items-center justify-between text-rose-400 text-xs shrink-0">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>{errorBanner}</span>
+            </div>
+            <button
+              onClick={() => setErrorBanner(null)}
+              className="text-slate-400 hover:text-white text-xs font-bold"
+            >
+              ✕
+            </button>
           </div>
         )}
 
@@ -482,13 +609,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowNewModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs font-medium"
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/30"
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-md shadow-indigo-600/30 transition"
                 >
                   Crear Estudio
                 </button>

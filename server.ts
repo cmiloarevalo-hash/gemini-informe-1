@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { DocumentService } from "./src/core/documents/document.service";
 import { AnalysisOrchestrator } from "./src/core/analysis/analysis.orchestrator";
 import { GeminiProvider } from "./src/core/providers/gemini.provider";
+import { CredentialStore } from "./src/core/providers/credential.store";
 import { AuthService } from "./src/core/auth/auth.service";
 import { ModuleRegistry } from "./src/core/modules/module.registry";
 import { TitleStudyModule } from "./src/modules/title-study/index";
@@ -25,10 +26,10 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 30 * 1024 * 1024 } // 30 MB max
+  limits: { fileSize: 30 * 1024 * 1024 } // 30 MB max per file
 });
 
-// In-memory study registry
+// In-memory study registry (Starts empty with zero hardcoded studies)
 interface StudyRecord {
   id: string;
   userId: string;
@@ -39,20 +40,7 @@ interface StudyRecord {
   createdAt: string;
 }
 
-const studies: Map<string, StudyRecord> = new Map([
-  [
-    "std-demo-01",
-    {
-      id: "std-demo-01",
-      userId: "usr-default-analyst",
-      name: "Estudio Matriz Fundo San Juan de Pirque",
-      role: "145-2",
-      commune: "Pirque",
-      moduleType: "TITLE_STUDY",
-      createdAt: new Date().toISOString()
-    }
-  ]
-]);
+const studies: Map<string, StudyRecord> = new Map();
 
 // --- API ROUTES ---
 
@@ -71,7 +59,120 @@ app.get("/api/user", (_req, res) => {
   res.json(AuthService.getCurrentUser());
 });
 
-// Model Discovery & Capabilities
+// --- CREDENTIAL MANAGEMENT ENDPOINTS (Tasks 4, 5, 6, 8) ---
+// Note: Raw keys are NEVER returned to frontend. Stored server-side in memory (IN_MEMORY_CREDENTIAL_STORE).
+
+// GET /api/providers
+app.get("/api/providers", (_req, res) => {
+  const credentials = CredentialStore.listCredentials();
+  res.json(credentials);
+});
+
+// POST /api/providers
+app.post("/api/providers", (req, res) => {
+  try {
+    const { provider, alias, apiKey, baseUrl, defaultModel } = req.body;
+    const cred = CredentialStore.addCredential({
+      provider,
+      alias,
+      apiKey,
+      baseUrl,
+      defaultModel
+    });
+    res.status(201).json(cred);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: msg });
+  }
+});
+
+// DELETE /api/providers/:id
+app.delete("/api/providers/:id", (req, res) => {
+  const { id } = req.params;
+  const deleted = CredentialStore.deleteCredential(id);
+  if (!deleted) {
+    res.status(404).json({ error: "Credencial no encontrada." });
+    return;
+  }
+  res.json({ success: true });
+});
+
+// POST /api/providers/:id/test
+app.post("/api/providers/:id/test", async (req, res) => {
+  const { id } = req.params;
+  const cred = CredentialStore.getCredential(id);
+  if (!cred) {
+    res.status(404).json({ error: "Credencial no encontrada." });
+    return;
+  }
+
+  if (cred.provider === "google-gemini") {
+    const provider = new GeminiProvider(cred.apiKey);
+    const result = await provider.testConnection(cred.defaultModel);
+    CredentialStore.updateTestResult(id, {
+      ok: result.ok,
+      latencyMs: result.latencyMs,
+      message: result.message,
+      selectedModel: result.selectedModel
+    });
+    res.json(result);
+  } else {
+    // Architecture ready for other providers
+    const latency = 15;
+    const msg = "Proveedor en estado ARCHITECTURE_READY. Conexión diferida.";
+    CredentialStore.updateTestResult(id, {
+      ok: false,
+      latencyMs: latency,
+      message: msg
+    });
+    res.json({
+      ok: false,
+      provider: cred.provider,
+      selectedModel: cred.defaultModel,
+      latencyMs: latency,
+      message: msg
+    });
+  }
+});
+
+// POST /api/providers/:id/models
+app.post("/api/providers/:id/models", async (req, res) => {
+  const { id } = req.params;
+  const cred = CredentialStore.getCredential(id);
+  if (!cred) {
+    res.status(404).json({ error: "Credencial no encontrada." });
+    return;
+  }
+
+  if (cred.provider === "google-gemini") {
+    try {
+      const provider = new GeminiProvider(cred.apiKey);
+      const models = await provider.listModels();
+      const modelIds = models.map((m) => m.modelId);
+      CredentialStore.updateAvailableModels(id, modelIds);
+      res.json({
+        provider: cred.provider,
+        models
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(500).json({ error: `Fallo al listar modelos reales: ${msg}` });
+    }
+  } else {
+    res.json({
+      provider: cred.provider,
+      models: cred.availableModels.map((m) => ({
+        modelId: m,
+        normalizedId: m,
+        displayName: m,
+        capabilities: { text: true, image: false, pdf: false, structuredOutput: true, reasoning: true },
+        status: "ARCHITECTURE_READY"
+      }))
+    });
+  }
+});
+
+// Global Models list endpoint (Default Provider)
 app.get("/api/models", async (_req, res) => {
   const provider = new GeminiProvider();
   const models = await provider.listModels();
@@ -81,7 +182,7 @@ app.get("/api/models", async (_req, res) => {
   });
 });
 
-// Test Model Connection
+// Global Test endpoint
 app.post("/api/models/test", async (req, res) => {
   const { modelId } = req.body;
   const provider = new GeminiProvider();
@@ -89,7 +190,8 @@ app.post("/api/models/test", async (req, res) => {
   res.json(result);
 });
 
-// Studies Management
+// --- STUDIES MANAGEMENT ---
+
 app.get("/api/studies", (_req, res) => {
   const currentUser = AuthService.getCurrentUser();
   const userStudies = Array.from(studies.values()).filter((s) => s.userId === currentUser.id);
@@ -100,7 +202,7 @@ app.post("/api/studies", (req, res) => {
   const currentUser = AuthService.getCurrentUser();
   const { name, moduleType, role, commune } = req.body;
 
-  if (!name || typeof name !== "string") {
+  if (!name || typeof name !== "string" || !name.trim()) {
     res.status(400).json({ error: "El nombre del estudio es obligatorio." });
     return;
   }
@@ -120,38 +222,61 @@ app.post("/api/studies", (req, res) => {
   res.status(201).json(newStudy);
 });
 
-// Document Ingestion (Real SHA-256 and byte analysis)
-app.post("/api/studies/:studyId/documents", upload.single("file"), async (req, res) => {
-  const { studyId } = req.params;
-  const currentUser = AuthService.getCurrentUser();
-  const study = studies.get(studyId);
+// --- MULTI-DOCUMENT UPLOAD (Tasks 1, 2, 3) ---
 
-  if (!study || study.userId !== currentUser.id) {
-    res.status(404).json({ error: "Estudio no encontrado o acceso no autorizado." });
-    return;
-  }
+app.post(
+  "/api/studies/:studyId/documents",
+  upload.array("files", 20),
+  async (req, res) => {
+    const { studyId } = req.params;
+    const currentUser = AuthService.getCurrentUser();
+    const study = studies.get(studyId);
 
-  if (!req.file) {
-    res.status(400).json({ error: "No se proporcionó ningún archivo." });
-    return;
-  }
+    if (!study || study.userId !== currentUser.id) {
+      res.status(404).json({ error: "Estudio no encontrado o acceso no autorizado." });
+      return;
+    }
 
-  try {
-    const doc = await DocumentService.ingestDocument({
-      userId: currentUser.id,
-      studyId,
-      originalName: req.file.originalname,
-      mimeType: req.file.mimetype || "application/octet-stream",
-      buffer: req.file.buffer,
-      source: "local"
+    const files = (req.files as Express.Multer.File[]) || (req.file ? [req.file] : []);
+    if (!files || files.length === 0) {
+      res.status(400).json({ error: "No se proporcionó ningún archivo." });
+      return;
+    }
+
+    const results: Array<{ file: string; doc?: any; error?: string }> = [];
+
+    for (const f of files) {
+      try {
+        const doc = await DocumentService.ingestDocument({
+          userId: currentUser.id,
+          studyId,
+          originalName: f.originalname,
+          mimeType: f.mimetype || "application/octet-stream",
+          buffer: f.buffer,
+          source: "local"
+        });
+        results.push({ file: f.originalname, doc });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        results.push({ file: f.originalname, error: msg });
+      }
+    }
+
+    const hasErrors = results.some((r) => r.error);
+    const allErrors = results.every((r) => r.error);
+
+    if (allErrors) {
+      res.status(400).json({ error: "No se pudo procesar ningún archivo.", details: results });
+      return;
+    }
+
+    res.status(201).json({
+      success: true,
+      processed: results.filter((r) => r.doc).map((r) => r.doc),
+      errors: results.filter((r) => r.error)
     });
-
-    res.status(201).json(doc);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(500).json({ error: `Fallo de ingestión documental: ${msg}` });
   }
-});
+);
 
 app.get("/api/studies/:studyId/documents", (req, res) => {
   const { studyId } = req.params;
@@ -160,10 +285,11 @@ app.get("/api/studies/:studyId/documents", (req, res) => {
   res.json(docs);
 });
 
-// Orchestrate Analysis (12 phases)
+// --- ORCHESTRATE ANALYSIS (Tasks 10, 11, 12, 13) ---
+
 app.post("/api/studies/:studyId/analyze", async (req, res) => {
   const { studyId } = req.params;
-  const { modelId } = req.body;
+  const { modelId, credentialId, provider } = req.body;
   const currentUser = AuthService.getCurrentUser();
   const study = studies.get(studyId);
 
@@ -175,7 +301,7 @@ app.post("/api/studies/:studyId/analyze", async (req, res) => {
   const docs = DocumentService.listDocumentsByStudy(studyId, currentUser.id);
   if (docs.length === 0) {
     res.status(400).json({
-      error: "El estudio no cuenta con documentos auténticos adjuntos. Cargue al menos una escritura, plano o certificado CBR."
+      error: "Incorpora al menos un antecedente antes de ejecutar el análisis."
     });
     return;
   }
@@ -192,7 +318,8 @@ app.post("/api/studies/:studyId/analyze", async (req, res) => {
       studyName: study.name,
       userId: currentUser.id,
       moduleId: study.moduleType,
-      modelId,
+      modelId: modelId || "gemini-3.6-flash",
+      credentialId,
       documents: docs,
       documentBuffers: buffers
     });
@@ -215,7 +342,7 @@ app.get("/api/studies/:studyId/analysis", (req, res) => {
   res.json(analysis);
 });
 
-// Download DOCX Report
+// Download DOCX Report (Tasks 22)
 app.get("/api/studies/:studyId/report/docx", async (req, res) => {
   const { studyId } = req.params;
   const analysis = AnalysisOrchestrator.getAnalysis(studyId);

@@ -4,6 +4,7 @@ import { TitleChainLink, EncumbranceRecord } from "../../schemas/title-study.sch
 
 export interface EvidenceGateValidationResult {
   passed: boolean;
+  status: "PASS" | "FAIL" | "NOT_EXECUTED";
   violations: string[];
   totalFactsChecked: number;
   factsWithValidEvidence: number;
@@ -35,6 +36,18 @@ export class EvidenceGate {
     const { documents, facts, titleChain, encumbrances, conclusions } = params;
     const violations: string[] = [];
 
+    // If 0 facts: NOT_EXECUTED (Task 19)
+    if (!facts || facts.length === 0) {
+      return {
+        passed: false,
+        status: "NOT_EXECUTED",
+        violations: ["No se registran hechos documentados para evaluar en Evidence Gate."],
+        totalFactsChecked: 0,
+        factsWithValidEvidence: 0,
+        coverageRatio: 0
+      };
+    }
+
     const docMap = new Map<string, StudyDocument>();
     for (const d of documents) {
       docMap.set(d.id, d);
@@ -44,7 +57,7 @@ export class EvidenceGate {
 
     // Rule 1: Facts validation
     for (const fact of facts) {
-      if (fact.evidence.length === 0) {
+      if (!fact.evidence || fact.evidence.length === 0) {
         violations.push(
           `[EVD-G01] Hecho '${fact.id}' (${fact.type}) carece de evidencia documental asociada.`
         );
@@ -59,7 +72,7 @@ export class EvidenceGate {
             `[EVD-G02] Evidencia '${ev.id}' en hecho '${fact.id}' referencia un documentId inexistente en el estudio: '${ev.documentId}'.`
           );
           factValid = false;
-        } else if (doc.pageCount && ev.page !== null) {
+        } else if (doc.pageCount && ev.page !== null && ev.page !== undefined) {
           if (ev.page < 1 || ev.page > doc.pageCount) {
             violations.push(
               `[EVD-G03] Evidencia '${ev.id}' cita la página ${ev.page}, pero el documento '${doc.originalName}' solo posee ${doc.pageCount} páginas.`
@@ -77,7 +90,7 @@ export class EvidenceGate {
     // Rule 2: Title Chain links
     if (titleChain) {
       for (const link of titleChain) {
-        if (link.status === "CONFIRMED_LINK" && link.evidence.length === 0) {
+        if (link.status === "CONFIRMED_LINK" && (!link.evidence || link.evidence.length === 0)) {
           violations.push(
             `[EVD-G04] Eslabón de dominio '${link.id}' declarado como CONFIRMED_LINK no posee evidencia documental comprobada.`
           );
@@ -122,11 +135,12 @@ export class EvidenceGate {
     }
 
     const totalFacts = facts.length;
-    const coverageRatio = totalFacts > 0 ? factsWithValidEvidence / totalFacts : 1;
-    const passed = violations.length === 0;
+    const coverageRatio = totalFacts > 0 ? factsWithValidEvidence / totalFacts : 0;
+    const passed = violations.length === 0 && coverageRatio === 1;
 
     return {
       passed,
+      status: passed ? "PASS" : "FAIL",
       violations,
       totalFactsChecked: totalFacts,
       factsWithValidEvidence,

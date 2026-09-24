@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { PDFDocument } from "pdf-lib";
-import { StudyDocument, DocumentStatus, ReadingQuality, DocumentType } from "../../schemas/document.schema";
+import { StudyDocument, ReadingQuality, DocumentType } from "../../schemas/document.schema";
 
 export interface IngestDocumentInput {
   userId: string;
@@ -35,30 +35,49 @@ export class DocumentService {
   }
 
   /**
+   * Validates backend format for PDF, DOCX, JPG, JPEG, PNG.
+   * Throws FILE_FORMAT_ERROR if format is unauthorized.
+   */
+  public static validateFormat(originalName: string, mimeType: string): void {
+    const ext = originalName.slice(originalName.lastIndexOf(".")).toLowerCase();
+    const allowedExtensions = [".pdf", ".docx", ".jpg", ".jpeg", ".png"];
+
+    const isPdf = ext === ".pdf" || mimeType === "application/pdf";
+    const isDocx =
+      ext === ".docx" ||
+      mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      mimeType === "application/msword";
+    const isJpg = ext === ".jpg" || ext === ".jpeg" || mimeType === "image/jpeg" || mimeType === "image/pjpeg";
+    const isPng = ext === ".png" || mimeType === "image/png";
+
+    if (!allowedExtensions.includes(ext) && !isPdf && !isDocx && !isJpg && !isPng) {
+      throw new Error(
+        `[FILE_FORMAT_ERROR] Formato no admitido para '${originalName}'. Solo se permiten archivos PDF, DOCX, JPG, JPEG y PNG.`
+      );
+    }
+  }
+
+  /**
    * Primary ingestion pipeline for real files.
    */
   public static async ingestDocument(input: IngestDocumentInput): Promise<StudyDocument> {
+    // Backend validation of format
+    this.validateFormat(input.originalName, input.mimeType);
+
     const sha256 = this.calculateSha256(input.buffer);
     const size = input.buffer.length;
 
     let pageCount: number | null = null;
-    let readingQuality: ReadingQuality = "UNKNOWN";
+    // Task 3: No marcar readingQuality HIGH automáticamente. Inicialmente UNKNOWN.
+    const readingQuality: ReadingQuality = "UNKNOWN";
 
     if (input.mimeType === "application/pdf" || input.originalName.toLowerCase().endsWith(".pdf")) {
       pageCount = await this.inspectPdfPageCount(input.buffer);
-      readingQuality = pageCount !== null && pageCount > 0 ? "HIGH" : "UNREADABLE";
-    } else if (input.mimeType.startsWith("image/")) {
+    } else if (input.mimeType.startsWith("image/") || /\.(png|jpe?g)$/i.test(input.originalName)) {
       pageCount = 1;
-      readingQuality = "HIGH";
     }
 
     const documentId = `doc-${crypto.randomUUID()}`;
-
-    // Extract quick textual hint if text-based or minimal preview
-    let textExcerpt: string | undefined = undefined;
-    if (input.mimeType.includes("text") || input.originalName.endsWith(".txt")) {
-      textExcerpt = input.buffer.toString("utf8").slice(0, 1000);
-    }
 
     const studyDoc: StudyDocument = {
       id: documentId,
@@ -73,8 +92,7 @@ export class DocumentService {
       status: "READY_FOR_AI",
       pageCount,
       readingQuality,
-      createdAt: new Date().toISOString(),
-      textExcerpt
+      createdAt: new Date().toISOString()
     };
 
     this.documentStore.set(documentId, { doc: studyDoc, buffer: input.buffer });
@@ -107,11 +125,15 @@ export class DocumentService {
     return this.documentStore.delete(documentId);
   }
 
-  public static updateClassification(documentId: string, type: DocumentType): void {
+  public static updateDocumentAfterAnalysis(
+    documentId: string,
+    updates: { classifiedType?: DocumentType; readingQuality?: ReadingQuality; status?: StudyDocument["status"] }
+  ): void {
     const item = this.documentStore.get(documentId);
     if (item) {
-      item.doc.classifiedType = type;
-      item.doc.status = "PROCESSED";
+      if (updates.classifiedType) item.doc.classifiedType = updates.classifiedType;
+      if (updates.readingQuality) item.doc.readingQuality = updates.readingQuality;
+      if (updates.status) item.doc.status = updates.status;
     }
   }
 }

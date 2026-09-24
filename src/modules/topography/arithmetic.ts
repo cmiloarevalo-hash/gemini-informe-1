@@ -1,7 +1,7 @@
 export class TopographyArithmetic {
   /**
    * Parses surface text strings into normalized square meters (m²).
-   * Supports: "8,85 ha", "0.98 ha", "1.200 m2", "1,200 m2", "9.800 m²", "10500 metros cuadrados".
+   * Supports strings such as "10 ha", "2,5 ha", "1.500 m2", "10500 metros cuadrados".
    */
   public static parseSurfaceToM2(raw: string): number {
     const cleaned = raw.toLowerCase().trim();

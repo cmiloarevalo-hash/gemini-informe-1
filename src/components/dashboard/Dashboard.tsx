@@ -6,12 +6,9 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertTriangle,
-  Clock,
   ArrowRight,
-  TrendingUp,
   Cpu,
-  Layers,
-  Search
+  Layers
 } from "lucide-react";
 
 interface StudySummary {
@@ -40,6 +37,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onSelectStudy,
   onNavigateToAudit
 }) => {
+  const hasDocuments = documentsCount > 0;
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
       {/* Hero Action Banner */}
@@ -73,7 +72,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold shadow-md transition transform active:scale-95"
             >
               <Cloud className="h-4 w-4 text-emerald-400" />
-              <span>Importar desde Drive</span>
+              <span>Google Drive (PLANNED)</span>
             </button>
           </div>
         </div>
@@ -89,7 +88,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-extrabold text-white font-mono">{studies.length}</span>
-            <span className="text-[11px] text-emerald-400 font-medium">Expedientes</span>
+            <span className="text-[11px] text-slate-400 font-medium">Expedientes</span>
           </div>
           <p className="text-[10px] text-slate-400 mt-2">Inmuebles y poligonales bajo examen</p>
         </div>
@@ -102,34 +101,41 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-2xl font-extrabold text-white font-mono">{documentsCount}</span>
-            <span className="text-[11px] text-cyan-400 font-medium">CBR & Notaría</span>
+            <span className="text-[11px] text-cyan-400 font-medium">En custodia</span>
           </div>
           <p className="text-[10px] text-slate-400 mt-2">Bit-a-bit con SHA-256 verificado</p>
         </div>
 
-        {/* Metric 3 */}
+        {/* Metric 3: Evidence Gate (Task 19: NOT_EXECUTED when 0 docs/facts) */}
         <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800/80 shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-2">
             <span>Evidence Gate</span>
             <ShieldCheck className="h-4 w-4 text-emerald-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-extrabold text-emerald-400 font-mono">100%</span>
-            <span className="text-[11px] text-emerald-400 font-medium">PASS</span>
+            <span
+              className={`text-2xl font-extrabold font-mono ${
+                hasDocuments ? "text-emerald-400" : "text-slate-400"
+              }`}
+            >
+              {hasDocuments ? "LISTO" : "NOT_EXECUTED"}
+            </span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-2">Cero hechos sin cita de documento</p>
+          <p className="text-[10px] text-slate-400 mt-2">
+            {hasDocuments ? "Control de evidencia disponible" : "Requiere documentos para evaluar"}
+          </p>
         </div>
 
-        {/* Metric 4 */}
+        {/* Metric 4: AI Model */}
         <div className="p-5 rounded-xl bg-slate-900/60 border border-slate-800/80 shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between text-slate-400 text-xs font-medium mb-2">
-            <span>Proveedor IA Activo</span>
+            <span>Modelo IA Oficial</span>
             <Cpu className="h-4 w-4 text-purple-400" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-xl font-extrabold text-purple-300 font-mono">Gemini 3.8</span>
+            <span className="text-base font-extrabold text-purple-300 font-mono">gemini-3.6-flash</span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-2">Flash oficial + alias certificado 3.6</p>
+          <p className="text-[10px] text-slate-400 mt-2">Procesamiento multimodal directo</p>
         </div>
       </div>
 
@@ -152,12 +158,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {studies.length === 0 ? (
-              <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl">
-                <FileText className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+              <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl space-y-2">
+                <FileText className="h-8 w-8 text-slate-600 mx-auto" />
                 <p className="text-xs text-slate-400 font-medium">No hay estudios creados todavía.</p>
                 <button
                   onClick={onOpenNewStudyModal}
-                  className="mt-3 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold"
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
                 >
                   Crear Primer Estudio
                 </button>
@@ -180,9 +186,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center gap-3 text-[11px] text-slate-400 font-mono">
-                        <span>Rol: {study.role || "N/C"}</span>
+                        <span>Rol: {study.role || "No consta"}</span>
                         <span>•</span>
-                        <span>Comuna: {study.commune || "N/C"}</span>
+                        <span>Comuna: {study.commune || "No consta"}</span>
                         <span>•</span>
                         <span>{new Date(study.createdAt).toLocaleDateString("es-CL")}</span>
                       </div>
@@ -202,12 +208,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 shadow-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-white">Estado de Procesamiento y Pipeline</h3>
-              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[10px] border border-emerald-500/20">
-                12 Fases Activas
+              <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[10px] border border-emerald-500/20 font-bold">
+                Pipeline Activo
               </span>
             </div>
             <p className="text-xs text-slate-400 mb-3">
-              Pipeline de orquestación en tiempo real: Ingestión ➔ Extracción Multimodal ➔ Entity Resolution ➔ Cadena ➔
+              Pipeline de orquestación en tiempo real: Ingestión ➔ Extracción Multimodal ➔ Análisis Cruzado ➔
               Evidence Gate ➔ DOCX.
             </p>
             <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs font-mono text-slate-300 space-y-1.5">
@@ -220,8 +226,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="text-emerald-400 font-semibold">Fallo Explícito (Sin Mocks)</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-400">Normativa CBR:</span>
-                <span className="text-indigo-400 font-semibold">Ausencia ≠ Inexistencia</span>
+                <span className="text-slate-400">Principio Registral:</span>
+                <span className="text-indigo-400 font-semibold">Ausencia de Certificado ≠ Inexistencia</span>
               </div>
             </div>
           </div>
@@ -229,31 +235,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Right: Pendientes de Revisión & Auditoría Rápida (1 Col) */}
         <div className="space-y-4">
-          {/* Card: Pendientes de Revisión */}
+          {/* Card: Pendientes de Revisión (Clean without synthetic alerts) */}
           <div className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 shadow-sm space-y-3">
             <div className="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider">
               <AlertTriangle className="h-4 w-4" />
               <span>Pendientes de Revisión</span>
             </div>
-            <p className="text-xs text-slate-400">
-              Alertas generadas por el revisor crítico en los expedientes analizados:
-            </p>
 
-            <div className="space-y-2 text-xs">
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 space-y-1">
-                <p className="font-semibold text-xs text-amber-200">Certificado de Hipotecas Pendiente</p>
-                <p className="text-[11px] text-amber-300/80 leading-relaxed">
-                  Para emitir dictamen de dominio saneado es mandatorio adjuntar Certificado de Hipotecas y Gravámenes vigente.
+            {studies.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">
+                No hay alertas de revisión pendientes. Crea un estudio y adjunta antecedentes para iniciar la auditoría.
+              </p>
+            ) : (
+              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 text-xs text-slate-400">
+                <span>Expedientes bajo custodia: </span>
+                <strong className="text-white font-mono">{studies.length}</strong>.
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Las alertas y observaciones periciales se generarán dinámicamente al analizar los documentos.
                 </p>
               </div>
-
-              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 text-slate-300 space-y-1">
-                <p className="font-semibold text-xs text-slate-200">Tracto 10 Años</p>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Título antecedente citado a Fojas 980 N° 450 año 2010 requiere ser incorporado para cerrar el tracto.
-                </p>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Card: Quick Audit Access */}
@@ -263,7 +264,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <span>Auditoría & Trazabilidad</span>
             </div>
             <p className="text-xs text-slate-400">
-              Acceso a los 10 artefactos del Audit Bundle para peritajes externos y verificación de conformidad.
+              Acceso a los artefactos del Audit Bundle para peritajes externos y verificación de conformidad técnica.
             </p>
             <button
               onClick={onNavigateToAudit}

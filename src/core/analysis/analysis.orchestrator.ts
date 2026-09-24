@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import { StudyDocument } from "../../schemas/document.schema";
-import { CentralAnalysis, ComparisonItem } from "../../schemas/analysis.schema";
+import { StudyDocument, DocumentType, ReadingQuality } from "../../schemas/document.schema";
+import { CentralAnalysis, CentralAnalysisSchema, ComparisonItem } from "../../schemas/analysis.schema";
 import { Fact, Finding, Conclusion } from "../../schemas/fact.schema";
 import { TitleChainLink, EncumbranceRecord } from "../../schemas/title-study.schema";
 import { TopographicAnalysisData } from "../../schemas/topography.schema";
@@ -9,6 +9,8 @@ import { EvidenceGate } from "../evidence/evidence.gate";
 import { AuditService } from "../audit/audit.service";
 import { JobService } from "../jobs/job.service";
 import { GeminiProvider } from "../providers/gemini.provider";
+import { CredentialStore } from "../providers/credential.store";
+import { DocumentService } from "../documents/document.service";
 import { TopographyArithmetic } from "../../modules/topography/arithmetic";
 
 export interface RunAnalysisOptions {
@@ -17,6 +19,7 @@ export interface RunAnalysisOptions {
   userId: string;
   moduleId: string;
   modelId?: string;
+  credentialId?: string;
   documents: StudyDocument[];
   documentBuffers: Map<string, Buffer>;
 }
@@ -25,17 +28,30 @@ export class AnalysisOrchestrator {
   private static analysisStore: Map<string, CentralAnalysis> = new Map();
 
   public static async executeAnalysis(options: RunAnalysisOptions): Promise<CentralAnalysis> {
-    const { studyId, studyName, userId, moduleId, modelId, documents, documentBuffers } = options;
+    const { studyId, studyName, userId, moduleId, modelId, credentialId, documents, documentBuffers } = options;
 
-    if (documents.length === 0) {
-      throw new Error("[ORCHESTRATION_ERROR] No se han proporcionado documentos auténticos para analizar.");
+    // Task 11: Bloquear análisis sin documentos
+    if (!documents || documents.length === 0) {
+      throw new Error(
+        "[ORCHESTRATION_ERROR] Incorpora al menos un antecedente antes de ejecutar el análisis."
+      );
     }
 
     // Phase 0: Security & Isolation Check
     SecurityGuard.assertStudyIsolation(documents, studyId, userId);
 
-    const provider = new GeminiProvider();
-    const effectiveModel = provider.normalizeModel(modelId);
+    // Retrieve credential if passed, or default to env
+    let apiKey: string | undefined = undefined;
+    if (credentialId) {
+      const cred = CredentialStore.getCredential(credentialId);
+      if (cred) {
+        apiKey = cred.apiKey;
+      }
+    }
+
+    const provider = new GeminiProvider(apiKey);
+    // Task 7: Exact modelId preserved, default to gemini-3.6-flash
+    const effectiveModel = provider.normalizeModel(modelId || "gemini-3.6-flash");
 
     // Create tracking Job
     const job = JobService.createJob({
@@ -47,14 +63,237 @@ export class AnalysisOrchestrator {
     });
 
     try {
+      // Phase 01: CLASSIFICATION
       JobService.updateStage(job.jobId, "01_CLASSIFICATION");
 
-      // Check if we have documents with contradictory property identifiers (Role conflict)
-      // Phase 04 / 07: Cross check for disparate properties
-      const detectedRoles = new Set<string>();
+      // Phase 02: EXTRACTION
+      JobService.updateStage(job.jobId, "02_EXTRACTION");
+
+      // Build analysis files payload with real buffers and MIME types
+      const analysisFiles: Array<{
+        mimeType: string;
+        buffer: Buffer;
+        fileName: string;
+      }> = [];
+
       for (const doc of documents) {
-        if (doc.originalName.includes("999-1")) detectedRoles.add("999-1");
-        if (doc.originalName.includes("120-4") || doc.textExcerpt?.includes("120-4")) detectedRoles.add("120-4");
+        const buf = documentBuffers.get(doc.id) || DocumentService.getDocumentBuffer(doc.id);
+        if (buf) {
+          analysisFiles.push({
+            mimeType: doc.mimeType || "application/pdf",
+            buffer: buf,
+            fileName: doc.originalName
+          });
+        }
+      }
+
+      // Construct exhaustive system instructions and structured prompt
+      const systemInstruction = `Eres un perito técnico-jurídico y auditor registral en derecho inmobiliario y topografía chilena.
+Tu labor es analizar minuciosamente los documentos auténticos acompañados en el expediente y extraer EXCLUSIVAMENTE hechos fácticos explícitos con citas textuales literales exactas.
+
+REGLA DE ORO DE INTEGRIDAD:
+1. NUNCA inventes nombres de personas, RUTs, inmuebles, roles de avalúo, fojas, números, años, notarías, conservadores o superficies.
+2. Si un dato no consta expresamente en los documentos, no lo incluyas o indica 'NO CONSTA EN ANTECEDENTES'.
+3. Toda afirmación (fact) DEBE incluir en 'evidence':
+   - documentId: el ID exacto del documento correspondiente.
+   - fileName: el nombre del archivo.
+   - page: número de página real (1-indexado).
+   - originalText: la cita textual literal exacta entre comillas del documento. NUNCA una paráfrasis.
+   - confidence: "HIGH", "MEDIUM" o "LOW".
+4. Clasifica cada documento por su contenido real: INSCRIPCION_DOMINIO, DOMINIO_VIGENTE, ESCRITURA_PUBLICA, POSESION_EFECTIVA, INSCRIPCION_ESPECIAL_HERENCIA, CERTIFICADO_HIPOTECAS_GRAVAMENES, CERTIFICADO_PROHIBICIONES, CERTIFICADO_SII, AVALUO_FISCAL, CIP, PLANO, LEVANTAMIENTO_TOPOGRAFICO, RESOLUCION, SUBDIVISION, COMPROBANTE, OTRO.
+5. Calidad de lectura: HIGH, MEDIUM, LOW, UNREADABLE.
+6. Si se solicita estudio de títulos (TITLE_STUDY): analiza la cadena de títulos (tracto sucesivo) y gravámenes.
+7. Si se solicita estudio topográfico (TOPOGRAPHIC_STUDY): extrae tramos, deslindes y superficies declaradas.
+8. Si no se acompaña certificado de hipotecas y gravámenes vigente, debes indicar en encumbrances status: 'INSUFFICIENT_EVIDENCE' (Ausencia de certificado != Inexistencia de gravámenes).
+9. La respuesta debe ser estrictamente un objeto JSON con la estructura solicitada, sin explicaciones ni markdown circundante.`;
+
+      const documentsCatalog = documents.map((d) => ({
+        id: d.id,
+        fileName: d.originalName,
+        mimeType: d.mimeType,
+        pageCount: d.pageCount || 1,
+        sha256: d.sha256
+      }));
+
+      const prompt = `Analiza los siguientes ${documents.length} documentos auténticos cargados para el expediente '${studyName}' (Tipo: ${moduleId}):
+
+CATÁLOGO DE DOCUMENTOS DISPONIBLES:
+${JSON.stringify(documentsCatalog, null, 2)}
+
+Devuelve ÚNICAMENTE un JSON válido con la siguiente estructura:
+{
+  "documentClassifications": [
+    {
+      "documentId": "ID_DEL_DOCUMENTO",
+      "classifiedType": "TIPO_ENUM",
+      "readingQuality": "HIGH | MEDIUM | LOW | UNREADABLE",
+      "detectedRole": "string o null",
+      "detectedCommune": "string o null"
+    }
+  ],
+  "propertyDetails": {
+    "role": "string o null",
+    "commune": "string o null",
+    "address": "string o null",
+    "currentOwner": "string o null",
+    "rut": "string o null",
+    "surfaceStated": "string o null"
+  },
+  "facts": [
+    {
+      "id": "fact-1",
+      "type": "ROL_AVALUO | TITULAR_DOMINIO | SUPERFICIE | DESLINDES | INSCRIPCION_REGISTRAL | GRAVAMEN | TOPOGRAFIA | OTRO",
+      "originalValue": "valor literal",
+      "normalizedValue": "valor normalizado",
+      "explicitInDocument": true,
+      "evidence": [
+        {
+          "id": "ev-1",
+          "documentId": "ID_DEL_DOCUMENTO",
+          "fileName": "NOMBRE_ARCHIVO",
+          "page": 1,
+          "originalText": "Cita textual literal y exacta del documento",
+          "confidence": "HIGH"
+        }
+      ]
+    }
+  ],
+  "titleChain": [
+    {
+      "id": "link-1",
+      "seller": "Nombre vendedor o null",
+      "buyer": "Nombre comprador o null",
+      "titleType": "Compraventa | Adjudicación | etc",
+      "deedDate": "YYYY-MM-DD o null",
+      "notary": "string o null",
+      "repertory": "string o null",
+      "fojas": "string o null",
+      "numero": "string o null",
+      "year": "string o null",
+      "cbr": "string o null",
+      "previousTitleReference": "string o null",
+      "status": "CONFIRMED_LINK | REFERENCED_BUT_NOT_PROVIDED | MISSING_LINK | CONTRADICTORY_LINK",
+      "evidence": [
+        {
+          "id": "ev-link-1",
+          "documentId": "ID_DEL_DOCUMENTO",
+          "fileName": "NOMBRE_ARCHIVO",
+          "page": 1,
+          "originalText": "Cita textual de inscripción o escritura"
+        }
+      ]
+    }
+  ],
+  "encumbrances": [
+    {
+      "id": "enc-1",
+      "type": "HIPOTECA | GRAVAMEN | PROHIBICION | SERVIDUMBRE",
+      "description": "Descripción",
+      "status": "VIGENTE | CANCELADO | INSUFFICIENT_EVIDENCE | NO_ENCUMBRANCES_RECORDED",
+      "evidence": [
+        {
+          "id": "ev-enc-1",
+          "documentId": "ID_DEL_DOCUMENTO",
+          "fileName": "NOMBRE_ARCHIVO",
+          "page": 1,
+          "originalText": "Cita textual"
+        }
+      ]
+    }
+  ],
+  "topography": {
+    "segments": [
+      {
+        "id": "seg-1",
+        "orientation": "NORTE | SUR | ORIENTE | PONIENTE",
+        "statedLengthMeters": 100.5,
+        "adjacentOwner": "Colindante",
+        "evidence": [...]
+      }
+    ],
+    "surfaces": [
+      {
+        "sourceType": "TITLE_DEED | TOPOGRAPHIC_SURVEY",
+        "statedValueRaw": "10.000 m2",
+        "evidence": [...]
+      }
+    ]
+  },
+  "discrepancies": ["lista de discrepancias si existen, o arreglo vacío"],
+  "missingEvidence": ["documentos o títulos referenciados pero no acompañados"],
+  "findings": [
+    {
+      "id": "find-1",
+      "category": "DOCUMENTED_FACT",
+      "statement": "Hallazgo fáctico",
+      "supportingFactIds": ["fact-1"],
+      "evidenceIds": ["ev-1"],
+      "confidence": "HIGH",
+      "requiresProfessionalReview": false
+    }
+  ],
+  "conclusions": [
+    {
+      "id": "conc-1",
+      "category": "DOCUMENTED_FACT",
+      "text": "Conclusión fáctica",
+      "supportingFactIds": ["fact-1"],
+      "confidence": "HIGH",
+      "requiresProfessionalReview": true
+    }
+  ]
+}`;
+
+      // Execute Real Model Call with real bytes
+      const aiResponse = await provider.analyze({
+        modelId: effectiveModel,
+        systemInstruction,
+        prompt,
+        files: analysisFiles,
+        jsonSchema: { type: "object" }
+      });
+
+      let parsed = aiResponse.parsedJson as any;
+      if (!parsed || typeof parsed !== "object") {
+        try {
+          const cleaned = aiResponse.text.replace(/```json\n?|\n?```/g, "").trim();
+          parsed = JSON.parse(cleaned);
+        } catch (e) {
+          throw new Error(
+            `[MODEL_OUTPUT_ERROR] El modelo devolvió una respuesta no analizable como JSON: ${aiResponse.text.slice(0, 200)}...`
+          );
+        }
+      }
+
+      // Update documents in DocumentService with real classifications & reading quality
+      if (Array.isArray(parsed.documentClassifications)) {
+        for (const c of parsed.documentClassifications) {
+          if (c.documentId) {
+            DocumentService.updateDocumentAfterAnalysis(c.documentId, {
+              classifiedType: c.classifiedType as DocumentType,
+              readingQuality: c.readingQuality as ReadingQuality,
+              status: "PROCESSED"
+            });
+          }
+        }
+      }
+
+      // Check cross-document consistency (Property Role Contradictions)
+      const detectedRoles = new Set<string>();
+      if (Array.isArray(parsed.documentClassifications)) {
+        for (const c of parsed.documentClassifications) {
+          if (c.detectedRole && typeof c.detectedRole === "string" && c.detectedRole.trim()) {
+            detectedRoles.add(c.detectedRole.trim());
+          }
+        }
+      }
+      // Also inspect facts for roles
+      if (Array.isArray(parsed.facts)) {
+        for (const f of parsed.facts) {
+          if (f.type === "ROL_AVALUO" && f.originalValue) {
+            detectedRoles.add(String(f.originalValue).trim());
+          }
+        }
       }
 
       if (detectedRoles.size > 1) {
@@ -63,224 +302,18 @@ export class AnalysisOrchestrator {
         );
       }
 
-      JobService.updateStage(job.jobId, "02_EXTRACTION");
+      // Phase 03: TITLE CHAIN
+      JobService.updateStage(job.jobId, "03_TITLE_CHAIN");
 
-      // Extract real facts and findings
-      const facts: Fact[] = [];
-      const titleChain: TitleChainLink[] = [];
-      const encumbrances: EncumbranceRecord[] = [];
-      const comparisons: ComparisonItem[] = [];
-      const discrepancies: string[] = [];
-      const missingEvidence: string[] = [];
-      const findings: Finding[] = [];
-      const conclusions: Conclusion[] = [];
+      const facts: Fact[] = Array.isArray(parsed.facts) ? parsed.facts : [];
+      const titleChain: TitleChainLink[] = Array.isArray(parsed.titleChain) ? parsed.titleChain : [];
+      const encumbrances: EncumbranceRecord[] = Array.isArray(parsed.encumbrances) ? parsed.encumbrances : [];
+      const discrepancies: string[] = Array.isArray(parsed.discrepancies) ? parsed.discrepancies : [];
+      const missingEvidence: string[] = Array.isArray(parsed.missingEvidence) ? parsed.missingEvidence : [];
+      const findings: Finding[] = Array.isArray(parsed.findings) ? parsed.findings : [];
+      const conclusions: Conclusion[] = Array.isArray(parsed.conclusions) ? parsed.conclusions : [];
 
-      let topoData: TopographicAnalysisData | undefined = undefined;
-
-      // Primary extraction per document
-      for (let i = 0; i < documents.length; i++) {
-        const doc = documents[i];
-        const page = doc.pageCount ? 1 : 1;
-
-        // Fact 1: Registration or survey record
-        const factId = `fact-${i + 1}-reg`;
-        facts.push({
-          id: factId,
-          type: moduleId === "TOPOGRAPHIC_STUDY" ? "TOPOGRAPHIC_SURVEY" : "INSCRIPTION_RECORD",
-          originalValue: doc.originalName,
-          normalizedValue: doc.originalName.replace(/\.[^/.]+$/, ""),
-          explicitInDocument: true,
-          evidence: [
-            {
-              id: `ev-${i + 1}-1`,
-              documentId: doc.id,
-              fileName: doc.originalName,
-              page,
-              originalText: `Documento verificado con hash ${doc.sha256.slice(0, 12)}`,
-              confidence: "HIGH"
-            }
-          ]
-        });
-
-        // Title study specific facts
-        if (moduleId === "TITLE_STUDY") {
-          const ownerFactId = `fact-${i + 1}-owner`;
-          facts.push({
-            id: ownerFactId,
-            type: "TITULAR_DOMINIO",
-            originalValue: "Inversiones y Rentas Los Robles SpA",
-            normalizedValue: "Inversiones y Rentas Los Robles SpA",
-            explicitInDocument: true,
-            evidence: [
-              {
-                id: `ev-${i + 1}-2`,
-                documentId: doc.id,
-                fileName: doc.originalName,
-                page,
-                originalText: "Consta dominio a nombre de Inversiones y Rentas Los Robles SpA",
-                confidence: "HIGH"
-              }
-            ]
-          });
-
-          // Build title chain link
-          titleChain.push({
-            id: `link-${i + 1}`,
-            seller: i === 0 ? "Agrícola Central Ltda." : "Sociedad Inmobiliaria El Parque",
-            buyer: i === 0 ? "Inversiones y Rentas Los Robles SpA" : "Agrícola Central Ltda.",
-            titleType: "Compraventa",
-            deedDate: "2018-05-14",
-            notary: "Notaría René Benavente Cash",
-            repertory: "1452-2018",
-            fojas: "1234",
-            numero: "567",
-            year: "2018",
-            cbr: "Conservador de Bienes Raíces de Santiago",
-            previousTitleReference: "Fojas 980 N° 450 año 2010",
-            status: "CONFIRMED_LINK",
-            evidence: [
-              {
-                id: `ev-link-${i + 1}`,
-                documentId: doc.id,
-                fileName: doc.originalName,
-                page,
-                originalText: "Inscrito a Fojas 1234 N° 567 del Registro de Propiedad del año 2018",
-                confidence: "HIGH"
-              }
-            ]
-          });
-        }
-      }
-
-      // Check if previous title is unprovided (T-TITLE-001)
-      const hasPrior2010Deed = documents.some((d) => d.originalName.includes("2010"));
-      if (!hasPrior2010Deed && moduleId === "TITLE_STUDY") {
-        titleChain.push({
-          id: "link-prior-unprovided",
-          titleType: "Título Anterior Citado",
-          year: "2010",
-          previousTitleReference: "Fojas 980 N° 450 año 2010",
-          status: "REFERENCED_BUT_NOT_PROVIDED",
-          evidence: [
-            {
-              id: "ev-prior-ref",
-              documentId: documents[0].id,
-              fileName: documents[0].originalName,
-              page: 1,
-              originalText: "Según consta de título anterior a Fojas 980 N° 450 año 2010 que no se acompaña",
-              confidence: "MEDIUM"
-            }
-          ]
-        });
-        missingEvidence.push(
-          "Escritura e inscripción precedente citada a Fojas 980 N° 450 del año 2010 (no adjuntada al expediente)."
-        );
-      }
-
-      // Topography module calculations
-      if (moduleId === "TOPOGRAPHIC_STUDY") {
-        const parsedM2Deed = TopographyArithmetic.parseSurfaceToM2("8,85 ha"); // 88500 m2
-        const parsedM2Survey = TopographyArithmetic.parseSurfaceToM2("87.900 m2");
-        const diff = TopographyArithmetic.calculateDiscrepancy(parsedM2Deed, parsedM2Survey);
-
-        topoData = {
-          segments: [
-            {
-              id: "seg-1",
-              orientation: "NORTE",
-              statedLengthMeters: 250.4,
-              adjacentOwner: "Camino Público",
-              evidence: [
-                {
-                  id: "ev-topo-1",
-                  documentId: documents[0].id,
-                  fileName: documents[0].originalName,
-                  page: 1,
-                  originalText: "Deslinde Norte: 250,40 metros con camino público",
-                  confidence: "HIGH"
-                }
-              ]
-            },
-            {
-              id: "seg-2",
-              orientation: "SUR",
-              statedLengthMeters: 248.8,
-              adjacentOwner: "Fundo San José",
-              evidence: [
-                {
-                  id: "ev-topo-2",
-                  documentId: documents[0].id,
-                  fileName: documents[0].originalName,
-                  page: 1,
-                  originalText: "Deslinde Sur: 248,80 metros con Fundo San José",
-                  confidence: "HIGH"
-                }
-              ]
-            }
-          ],
-          surfaces: [
-            {
-              sourceType: "TITLE_DEED",
-              documentId: documents[0].id,
-              statedValueRaw: "8,85 ha",
-              normalizedSquareMeters: parsedM2Deed,
-              evidence: [
-                {
-                  id: "ev-surf-1",
-                  documentId: documents[0].id,
-                  fileName: documents[0].originalName,
-                  page: 1,
-                  originalText: "Superficie de 8,85 hectáreas según título",
-                  confidence: "HIGH"
-                }
-              ]
-            },
-            {
-              sourceType: "TOPOGRAPHIC_SURVEY",
-              documentId: documents[0].id,
-              statedValueRaw: "87.900 m2",
-              normalizedSquareMeters: parsedM2Survey,
-              evidence: [
-                {
-                  id: "ev-surf-2",
-                  documentId: documents[0].id,
-                  fileName: documents[0].originalName,
-                  page: 1,
-                  originalText: "Superficie de 87.900 m2 según levantamiento",
-                  confidence: "HIGH"
-                }
-              ]
-            }
-          ],
-          perimeterMetersCalculated: TopographyArithmetic.calculatePerimeter([250.4, 248.8]),
-          maxSurfaceDiscrepancyPercentage: diff.percentageDiff,
-          isWithinAcceptableTolerance: diff.isWithinTolerance,
-          notes: [
-            `Diferencia entre título (8,85 ha = 88.500 m²) y levantamiento (87.900 m²): ${diff.absoluteDiffM2} m² (${diff.percentageDiff}%). Dentro de tolerancia admisible.`
-          ]
-        };
-
-        facts.push({
-          id: "fact-topo-surface",
-          type: "SURFACE_CALCULATION",
-          originalValue: "8,85 ha vs 87.900 m2",
-          normalizedValue: parsedM2Deed,
-          unit: "m2",
-          explicitInDocument: true,
-          evidence: [
-            {
-              id: "ev-fact-topo",
-              documentId: documents[0].id,
-              fileName: documents[0].originalName,
-              page: 1,
-              originalText: "Superficie de 8,85 hectáreas",
-              confidence: "HIGH"
-            }
-          ]
-        });
-      }
-
-      // Check encumbrance certification (Section 39: Ausencia != Inexistencia)
+      // Check if unprovided title cited in documents
       const hasMortgageCert = documents.some(
         (d) =>
           d.classifiedType === "CERTIFICADO_HIPOTECAS_GRAVAMENES" ||
@@ -288,65 +321,125 @@ export class AnalysisOrchestrator {
           d.originalName.toLowerCase().includes("gravamen")
       );
 
+      // Phase 04: CROSS_DOCUMENT_ANALYSIS
+      JobService.updateStage(job.jobId, "04_CROSS_DOCUMENT_ANALYSIS");
+
+      // Phase 05: MISSING_EVIDENCE
+      JobService.updateStage(job.jobId, "05_MISSING_EVIDENCE");
+
+      // If encumbrance status claims NO_ENCUMBRANCES_RECORDED without certificate, fix to INSUFFICIENT_EVIDENCE
       if (!hasMortgageCert) {
-        encumbrances.push({
-          id: "enc-status-check",
-          type: "GRAVAMEN",
-          description: "Estado de gravámenes e hipotecas no verificable por falta de certificado",
-          status: "INSUFFICIENT_EVIDENCE",
-          evidence: [
-            {
-              id: "ev-no-mortgage-cert",
-              documentId: documents[0].id,
-              fileName: documents[0].originalName,
-              page: 1,
-              originalText: "No se acompañó Certificado de Hipotecas y Gravámenes con vigencia",
-              confidence: "MEDIUM"
-            }
-          ]
-        });
-        missingEvidence.push(
-          "Certificado de Hipotecas, Gravámenes, Interdicciones y Prohibiciones de Enajenar vigente emitido por el CBR respectivo."
-        );
+        const noCertPresent = encumbrances.some((e) => e.status === "INSUFFICIENT_EVIDENCE");
+        if (!noCertPresent) {
+          encumbrances.push({
+            id: `enc-no-cert-${Date.now()}`,
+            type: "GRAVAMEN",
+            description: "Estado de gravámenes e hipotecas no verificable por falta de certificado de CBR vigente",
+            status: "INSUFFICIENT_EVIDENCE",
+            evidence: [
+              {
+                id: `ev-no-mortgage-${Date.now()}`,
+                documentId: documents[0].id,
+                fileName: documents[0].originalName,
+                page: 1,
+                originalText: "No se acompañó Certificado de Hipotecas y Gravámenes vigente emitido por el CBR respectivo",
+                confidence: "MEDIUM"
+              }
+            ]
+          });
+        }
+        if (!missingEvidence.some((m) => m.toLowerCase().includes("hipoteca") || m.toLowerCase().includes("cbr"))) {
+          missingEvidence.push(
+            "Certificado de Hipotecas, Gravámenes, Interdicciones y Prohibiciones de Enajenar vigente emitido por el Conservador de Bienes Raíces respectivo."
+          );
+        }
       }
 
-      // Add Findings
-      findings.push({
-        id: "find-1",
-        category: "DOCUMENTED_FACT",
-        statement:
-          moduleId === "TOPOGRAPHIC_STUDY"
-            ? "Se verificó la poligonal y linderos del predio con coincidencia de colindantes principales."
-            : "Se constató inscripción de dominio vigente en favor de los titulares declarados.",
-        supportingFactIds: [facts[0].id],
-        evidenceIds: [facts[0].evidence[0].id],
-        confidence: "HIGH",
-        requiresProfessionalReview: false
-      });
+      // Topography arithmetic deterministic calculations
+      let topoData: TopographicAnalysisData | undefined = undefined;
+      if (moduleId === "TOPOGRAPHIC_STUDY" && parsed.topography) {
+        const rawSurfaces = Array.isArray(parsed.topography.surfaces) ? parsed.topography.surfaces : [];
+        const segments = Array.isArray(parsed.topography.segments) ? parsed.topography.segments : [];
 
-      // Add Conclusions (strictly linked to supporting facts)
-      conclusions.push({
-        id: "conc-1",
-        category: "DOCUMENTED_FACT",
-        text:
-          moduleId === "TOPOGRAPHIC_STUDY"
-            ? "La cabida del inmueble presenta una variación del 0.68% respecto al título de dominio, manteniéndose dentro de la tolerancia técnica y legal admisible (2.0%)."
-            : "Los títulos de dominio analizados se ajustan al tracto registral hasta donde consta en los antecedentes aportados, subsistiendo la necesidad de recabar el título anterior no acompañado.",
-        supportingFactIds: [facts[0].id],
-        confidence: "HIGH",
-        requiresProfessionalReview: true
-      });
+        const surfaces = rawSurfaces.map((s: any) => ({
+          sourceType: s.sourceType,
+          statedValueRaw: s.statedValueRaw,
+          normalizedSquareMeters: TopographyArithmetic.parseSurfaceToM2(s.statedValueRaw),
+          evidence: s.evidence || []
+        }));
 
-      JobService.updateStage(job.jobId, "10_CRITICAL_REVIEW");
+        const lengths = segments
+          .map((seg: any) => Number(seg.statedLengthMeters))
+          .filter((n: number) => !isNaN(n) && n > 0);
 
-      // Critical review evaluation
-      const criticalReviewPass = true;
+        const perimeter = TopographyArithmetic.calculatePerimeter(lengths);
+
+        let maxDiff = 0;
+        let isWithinTol = true;
+        const notes: string[] = [];
+
+        if (surfaces.length >= 2) {
+          const deedSurf = surfaces.find((s: any) => s.sourceType === "TITLE_DEED") || surfaces[0];
+          const survSurf = surfaces.find((s: any) => s.sourceType === "TOPOGRAPHIC_SURVEY") || surfaces[1];
+          const diffResult = TopographyArithmetic.calculateDiscrepancy(
+            deedSurf.normalizedSquareMeters,
+            survSurf.normalizedSquareMeters
+          );
+          maxDiff = diffResult.percentageDiff;
+          isWithinTol = diffResult.isWithinTolerance;
+          notes.push(
+            `Diferencia entre superficie de título (${deedSurf.statedValueRaw}) y levantamiento (${survSurf.statedValueRaw}): ${diffResult.absoluteDiffM2} m² (${diffResult.percentageDiff}%). ${
+              diffResult.isWithinTolerance ? "Dentro de tolerancia admisible (≤2.0%)." : "Supera la tolerancia máxima admisible."
+            }`
+          );
+        }
+
+        topoData = {
+          segments,
+          surfaces,
+          perimeterMetersCalculated: perimeter,
+          maxSurfaceDiscrepancyPercentage: maxDiff,
+          isWithinAcceptableTolerance: isWithinTol,
+          notes
+        };
+      }
+
+      // Phase 06: CRITICAL_REVIEW (Real check, no hardcoded pass)
+      JobService.updateStage(job.jobId, "06_CRITICAL_REVIEW");
       const issuesFound: string[] = [];
 
-      JobService.updateStage(job.jobId, "11_EVIDENCE_GATE");
+      // Check facts without evidence
+      for (const f of facts) {
+        if (!f.evidence || f.evidence.length === 0) {
+          issuesFound.push(`Hecho ${f.id} (${f.type}) no posee evidencia documental asociada.`);
+        } else {
+          for (const ev of f.evidence) {
+            if (!ev.originalText || ev.originalText.trim() === "") {
+              issuesFound.push(`Evidencia ${ev.id} en hecho ${f.id} carece de cita textual literal.`);
+            }
+          }
+        }
+      }
 
-      // Evidence Gate evaluation
-      const gateResult = EvidenceGate.assertGate({
+      // Check conclusions without supporting facts
+      for (const c of conclusions) {
+        if (!c.supportingFactIds || c.supportingFactIds.length === 0) {
+          issuesFound.push(`Conclusión ${c.id} carece de hechos fácticos de respaldo.`);
+        }
+      }
+
+      // Check mortgage cert rule
+      for (const enc of encumbrances) {
+        if (enc.status === "NO_ENCUMBRANCES_RECORDED" && !hasMortgageCert) {
+          issuesFound.push("Violación de principio jurídico: Inexistencia de gravámenes afirmada sin certificado.");
+        }
+      }
+
+      const criticalReviewPass = issuesFound.length === 0;
+
+      // Phase 07: EVIDENCE_GATE
+      JobService.updateStage(job.jobId, "07_EVIDENCE_GATE");
+      const gateResult = EvidenceGate.evaluate({
         documents,
         facts,
         titleChain,
@@ -354,7 +447,42 @@ export class AnalysisOrchestrator {
         conclusions
       });
 
-      // Phase 12: Build Manifest and CentralAnalysis Object
+      // Phase 08: REPORT_DRAFT & Schema Validation
+      JobService.updateStage(job.jobId, "08_REPORT_DRAFT");
+
+      // Entities & Relations derived strictly from facts
+      const entities: Array<{
+        id: string;
+        name: string;
+        type: "PERSON" | "LEGAL_ENTITY" | "PROPERTY" | "REGISTRATION";
+        rut?: string | null;
+        role?: string | null;
+      }> = [];
+
+      if (parsed.propertyDetails?.currentOwner && parsed.propertyDetails.currentOwner !== "NO CONSTA EN ANTECEDENTES") {
+        entities.push({
+          id: "ent-owner",
+          name: parsed.propertyDetails.currentOwner,
+          type: "PERSON",
+          rut: parsed.propertyDetails.rut || null,
+          role: "Titular de Dominio"
+        });
+      }
+
+      const comparisons: ComparisonItem[] = [];
+      if (topoData && topoData.surfaces.length >= 2) {
+        comparisons.push({
+          id: "comp-surf-1",
+          topic: "Superficie de Cabida",
+          sourceA: "Título de Dominio",
+          valueA: topoData.surfaces[0].statedValueRaw,
+          sourceB: "Levantamiento Topográfico",
+          valueB: topoData.surfaces[1].statedValueRaw,
+          status: topoData.isWithinAcceptableTolerance ? "CONSISTENT" : "DISCREPANCY",
+          notes: topoData.notes[0]
+        });
+      }
+
       const manifest = AuditService.buildExecutionManifest({
         studyId,
         moduleId,
@@ -364,7 +492,8 @@ export class AnalysisOrchestrator {
         facts,
         schemaValidationPass: true,
         criticalReviewPass,
-        evidenceGatePass: gateResult.passed
+        evidenceGatePass: gateResult.passed,
+        provider: "google-gemini"
       });
 
       const centralAnalysis: CentralAnalysis = {
@@ -377,24 +506,8 @@ export class AnalysisOrchestrator {
         },
         documents,
         facts,
-        entities: [
-          {
-            id: "ent-1",
-            name: "Inversiones y Rentas Los Robles SpA",
-            type: "LEGAL_ENTITY",
-            rut: "76.543.210-K",
-            role: "Propietario Actual"
-          }
-        ],
-        relations: [
-          {
-            id: "rel-1",
-            sourceEntityId: "ent-1",
-            targetEntityId: "ent-1",
-            type: "CURRENT_OWNER",
-            supportingFactId: facts[0].id
-          }
-        ],
+        entities,
+        relations: [],
         titleChain: moduleId === "TITLE_STUDY" ? titleChain : undefined,
         encumbrances: moduleId === "TITLE_STUDY" ? encumbrances : undefined,
         topography: topoData,
@@ -411,6 +524,17 @@ export class AnalysisOrchestrator {
         },
         executionManifest: manifest
       };
+
+      // Real Zod Schema Validation
+      const parseResult = CentralAnalysisSchema.safeParse(centralAnalysis);
+      manifest.schemaValidation = parseResult.success ? "PASS" : "FAIL";
+
+      if (!parseResult.success) {
+        centralAnalysis.qualityReview.approved = false;
+        centralAnalysis.qualityReview.issuesFound.push(
+          `Fallo de validación de esquema Zod: ${parseResult.error.message}`
+        );
+      }
 
       this.analysisStore.set(studyId, centralAnalysis);
       JobService.completeJob(job.jobId);

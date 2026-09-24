@@ -4,17 +4,15 @@ import {
   Cpu,
   Settings,
   User,
-  LogOut,
-  LogIn,
   CheckCircle2,
-  AlertCircle
+  Clock
 } from "lucide-react";
 
 interface HeaderProps {
   pageTitle: string;
   activeProvider: string;
   activeModel: string;
-  isDriveConnected: boolean;
+  isDriveConnected?: boolean;
   onOpenGoogleModal: () => void;
   onOpenSettings: () => void;
 }
@@ -23,7 +21,6 @@ export const Header: React.FC<HeaderProps> = ({
   pageTitle,
   activeProvider,
   activeModel,
-  isDriveConnected,
   onOpenGoogleModal,
   onOpenSettings
 }) => {
@@ -47,25 +44,18 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="font-semibold text-slate-200">{activeProvider}</span>
           <span className="text-slate-600">•</span>
           <span className="font-mono text-indigo-400 font-medium">{activeModel}</span>
-          <span className="px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[9px] border border-emerald-500/20 font-bold">
-            VERIFIED
-          </span>
         </div>
 
-        {/* Google Drive Status Pill */}
+        {/* Google Drive Status (Task 25: PLANNED) */}
         <button
           onClick={onOpenGoogleModal}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-            isDriveConnected
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
-              : "bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700"
-          }`}
-          title="Configurar conexión con Google Drive"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-950/80 text-slate-300 hover:border-slate-700 text-xs font-medium transition"
+          title="Google Drive: Planificado para siguiente fase"
         >
-          <Cloud className={`h-3.5 w-3.5 ${isDriveConnected ? "text-emerald-400" : "text-slate-400"}`} />
+          <Cloud className="h-3.5 w-3.5 text-slate-400" />
           <span>Drive:</span>
           <span className="font-mono text-[10px] text-amber-400 font-bold">
-            {isDriveConnected ? "CONECTADO" : "ARCHITECTURE_READY"}
+            PLANNED
           </span>
         </button>
 
@@ -73,23 +63,23 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onOpenSettings}
           className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition"
-          title="Configuración global"
+          title="Configuración de Proveedores IA"
         >
           <Settings className="h-4 w-4" />
         </button>
 
-        {/* User Account / Google Identity */}
+        {/* User Account / Google Identity (Task 25: PLANNED) */}
         <div className="pl-2 border-l border-slate-800 flex items-center gap-2.5">
           <button
             onClick={onOpenGoogleModal}
             className="flex items-center gap-2 p-1 pl-2 pr-2.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 transition"
           >
-            <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-400 flex items-center justify-center font-bold text-[10px] text-white shadow-sm">
-              CC
+            <div className="h-6 w-6 rounded-full bg-slate-700 flex items-center justify-center font-bold text-[10px] text-slate-300 shadow-sm">
+              <User className="h-3.5 w-3.5 text-slate-400" />
             </div>
             <div className="text-left hidden sm:block">
-              <p className="text-[11px] font-semibold text-slate-200 leading-tight">Camilo Consul</p>
-              <p className="text-[9px] text-emerald-400 font-mono">Google Conectado</p>
+              <p className="text-[11px] font-semibold text-slate-200 leading-tight">Perito Analista</p>
+              <p className="text-[9px] text-amber-400 font-mono">Google Auth: PLANNED</p>
             </div>
           </button>
         </div>

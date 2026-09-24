@@ -1,61 +1,40 @@
 import React, { useState } from "react";
 import {
   Cloud,
-  CheckCircle2,
-  AlertCircle,
   X,
   Lock,
-  ExternalLink,
-  ShieldCheck,
-  UserCheck,
-  FolderOpen
+  Clock,
+  Info
 } from "lucide-react";
 
 interface GoogleIntegrationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  isDriveConnected: boolean;
-  onToggleDriveConnection: (connected: boolean) => void;
+  isDriveConnected?: boolean;
+  onToggleDriveConnection?: (connected: boolean) => void;
 }
 
 export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
   isOpen,
-  onClose,
-  isDriveConnected,
-  onToggleDriveConnection
+  onClose
 }) => {
+  // Hooks MUST be called unconditionally at top of component
+  const [activeTab, setActiveTab] = useState<"auth" | "drive">("auth");
+
   if (!isOpen) return null;
 
-  const [isAuthorizing, setIsAuthorizing] = useState(false);
-  const [pickerStatus, setPickerStatus] = useState<string | null>(null);
-
-  const handleConnectToggle = () => {
-    setIsAuthorizing(true);
-    setTimeout(() => {
-      onToggleDriveConnection(!isDriveConnected);
-      setIsAuthorizing(false);
-    }, 600);
-  };
-
-  const handleLaunchPicker = () => {
-    setPickerStatus("Google Picker inicializado: Cargando vista de archivos autorizados...");
-    setTimeout(() => {
-      setPickerStatus("Google Picker listo. Seleccione escrituras, títulos o planos desde su unidad Drive.");
-    }, 800);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
       <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+            <div className="h-10 w-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold">
               <Cloud className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Integración Google & Drive</h3>
-              <p className="text-xs text-slate-400">Cuenta Google y Google Picker</p>
+              <h3 className="text-base font-bold text-white">Google Workspace & Drive</h3>
+              <p className="text-xs text-slate-400">Estado de integración técnica</p>
             </div>
           </div>
           <button
@@ -66,85 +45,54 @@ export const GoogleIntegrationModal: React.FC<GoogleIntegrationModalProps> = ({
           </button>
         </div>
 
-        {/* Current User Card */}
-        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-slate-400 font-medium">Cuenta Google Conectada:</span>
-            <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-mono text-[10px] border border-emerald-500/20 font-bold flex items-center gap-1">
-              <CheckCircle2 className="h-3 w-3" />
-              SESIÓN ACTIVA
-            </span>
+        {/* Deferred Notice Banner (Task 25) */}
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 space-y-2">
+          <div className="flex items-center gap-2 font-bold text-amber-400">
+            <Clock className="h-4 w-4" />
+            <span>Integración Diferida (PLANNED / DEFERRED)</span>
           </div>
-          <div className="flex items-center gap-3 pt-1">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-400 flex items-center justify-center font-bold text-xs text-white">
-              CC
-            </div>
-            <div>
-              <p className="font-bold text-white">Camilo Consul</p>
-              <p className="text-slate-400 font-mono text-[11px]">camilo.a.consul@gmail.com</p>
-            </div>
-          </div>
+          <p className="text-slate-300 leading-relaxed text-[11px]">
+            Conforme a la directriz de arquitectura de la Fase de Corrección Prioritaria, Google Login y Google Drive
+            se encuentran planificados para la siguiente fase. La plataforma opera actualmente en modo de ingestión
+            local de antecedentes con custodia y cálculo criptográfico SHA-256 bit-a-bit en el servidor.
+          </p>
         </div>
 
-        {/* Google Drive Status & Scope */}
+        {/* Details Cards */}
         <div className="space-y-3 text-xs">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-white">Conexión a Google Drive</h4>
-              <p className="text-slate-400 text-[11px]">Scope mínimo: https://www.googleapis.com/auth/drive.file</p>
-            </div>
-            <button
-              onClick={handleConnectToggle}
-              disabled={isAuthorizing}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                isDriveConnected
-                  ? "bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"
-                  : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-md shadow-emerald-600/20"
-              }`}
-            >
-              {isAuthorizing ? "Conectando..." : isDriveConnected ? "Desconectar Drive" : "Conectar Drive"}
-            </button>
-          </div>
-
-          {/* Google Picker Action */}
-          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FolderOpen className="h-4 w-4 text-emerald-400" />
-                <span className="font-semibold text-white">Google Picker Oficial</span>
-              </div>
-              <button
-                onClick={handleLaunchPicker}
-                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition"
-              >
-                Abrir Picker
-              </button>
+              <span className="font-semibold text-slate-200">Google Authentication:</span>
+              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono text-[10px] border border-amber-500/20 font-bold">
+                PLANNED
+              </span>
             </div>
-            {pickerStatus && (
-              <p className="text-emerald-400 text-[11px] font-mono pt-1">{pickerStatus}</p>
-            )}
+            <p className="text-slate-400 text-[11px]">
+              Inicio de sesión federado de peritos mediante OAuth 2.0 (Google Identity Services).
+            </p>
+          </div>
+
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-200">Google Drive & Picker API:</span>
+              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono text-[10px] border border-amber-500/20 font-bold">
+                PLANNED
+              </span>
+            </div>
+            <p className="text-slate-400 text-[11px]">
+              Acceso selectivo mediante scope restringido <code className="text-indigo-300 font-mono">drive.file</code> para
+              incorporación directa de planos DWG/PDF y escrituras notariales.
+            </p>
           </div>
         </div>
 
-        {/* Security Disclaimers */}
-        <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-400 space-y-1">
-          <p className="font-semibold text-slate-300 flex items-center gap-1.5">
-            <Lock className="h-3.5 w-3.5 text-indigo-400" />
-            <span>Política de Mínimo Privilegio (Drive.file)</span>
-          </p>
-          <p className="leading-relaxed">
-            La plataforma solo accederá a los documentos explícitamente seleccionados por usted a través de Google Picker,
-            garantizando privacidad y confidencialidad en estudios inmobiliarios.
-          </p>
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-end pt-2 border-t border-slate-800">
+        {/* Footer actions */}
+        <div className="pt-2 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-slate-800 text-slate-200 hover:bg-slate-700 text-xs font-medium transition"
+            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition"
           >
-            Cerrar
+            Entendido / Cerrar
           </button>
         </div>
       </div>

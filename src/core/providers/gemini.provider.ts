@@ -11,14 +11,15 @@ import {
 
 export class GeminiProvider implements AIProvider {
   public type: AIProviderType = "google-gemini";
-  private defaultModel = "gemini-3.8-flash";
+  private defaultModel = "gemini-3.6-flash";
   private aiClient: GoogleGenAI | null = null;
+  private apiKey: string | null = null;
 
-  constructor() {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey || process.env.GEMINI_API_KEY || null;
+    if (this.apiKey) {
       this.aiClient = new GoogleGenAI({
-        apiKey,
+        apiKey: this.apiKey,
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build"
@@ -28,70 +29,122 @@ export class GeminiProvider implements AIProvider {
     }
   }
 
+  /**
+   * Normalizes model ID. Strictly preserves gemini-3.6-flash without silent aliasing.
+   */
   public normalizeModel(modelId?: string): string {
     if (!modelId) return this.defaultModel;
-    // Map certification alias gemini-3.6-flash to gemini-3.8-flash or vice versa
-    if (modelId === "gemini-3.6-flash") return "gemini-3.8-flash";
-    if (modelId === "gemini-flash" || modelId === "flash") return "gemini-3.8-flash";
-    if (modelId === "gemini-pro" || modelId === "pro") return "gemini-3.1-pro-preview";
+    const trimmed = modelId.trim();
+
+    // Exact preservation of official model IDs
+    if (trimmed === "gemini-3.6-flash") return "gemini-3.6-flash";
+    if (trimmed === "gemini-3.8-flash") return "gemini-3.8-flash";
+    if (trimmed === "gemini-3.1-pro-preview") return "gemini-3.1-pro-preview";
 
     // Prohibit deprecated models strictly
     const prohibited = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-2.0-pro"];
-    if (prohibited.some((p) => modelId.includes(p))) {
-      throw new Error(`[MODEL_ERROR] Prohibited deprecated model requested: '${modelId}'. Use 'gemini-3.8-flash'.`);
+    if (prohibited.some((p) => trimmed.includes(p))) {
+      throw new Error(`[MODEL_ERROR] Prohibited deprecated model requested: '${trimmed}'. Use 'gemini-3.6-flash'.`);
     }
 
-    return modelId;
+    return trimmed;
   }
 
+  /**
+   * Dynamically lists models using Google GenAI SDK.
+   */
   public async listModels(): Promise<ModelInfo[]> {
-    return [
-      {
-        modelId: "gemini-3.8-flash",
-        normalizedId: "gemini-3.8-flash",
-        displayName: "Gemini 3.8 Flash (Vigente / Oficial)",
-        capabilities: {
-          text: true,
-          image: true,
-          pdf: true,
-          structuredOutput: true,
-          reasoning: true,
-          maxInputTokens: 1048576,
-          maxOutputTokens: 8192
-        },
-        status: "ACTIVE"
-      },
-      {
-        modelId: "gemini-3.6-flash",
-        normalizedId: "gemini-3.8-flash",
-        displayName: "Gemini 3.6 Flash (Certificado)",
-        capabilities: {
-          text: true,
-          image: true,
-          pdf: true,
-          structuredOutput: true,
-          reasoning: true,
-          maxInputTokens: 1048576,
-          maxOutputTokens: 8192
-        },
-        status: "SUPPORTED_ALIAS"
-      },
-      {
-        modelId: "gemini-3.1-pro-preview",
-        normalizedId: "gemini-3.1-pro-preview",
-        displayName: "Gemini 3.1 Pro Preview (Razonamiento Complejo)",
-        capabilities: {
-          text: true,
-          image: true,
-          pdf: true,
-          structuredOutput: true,
-          reasoning: true,
-          maxInputTokens: 2097152,
-          maxOutputTokens: 8192
-        },
-        status: "ACTIVE"
+    if (!this.aiClient) {
+      return [
+        {
+          modelId: "gemini-3.6-flash",
+          normalizedId: "gemini-3.6-flash",
+          displayName: "Gemini 3.6 Flash (Oficial)",
+          capabilities: {
+            text: true,
+            image: true,
+            pdf: true,
+            structuredOutput: true,
+            reasoning: true,
+            maxInputTokens: 1048576,
+            maxOutputTokens: 8192
+          },
+          status: "ACTIVE"
+        }
+      ];
+    }
+
+    try {
+      const list = await this.aiClient.models.list();
+      const models: ModelInfo[] = [];
+
+      for await (const m of list) {
+        if (m.name && m.name.includes("gemini")) {
+          const id = m.name.replace(/^models\//, "");
+          // Exclude deprecated models
+          if (!id.includes("1.5") && !id.includes("2.0")) {
+            models.push({
+              modelId: id,
+              normalizedId: id,
+              displayName: m.displayName || id,
+              capabilities: {
+                text: true,
+                image: true,
+                pdf: true,
+                structuredOutput: true,
+                reasoning: true,
+                maxInputTokens: 1048576,
+                maxOutputTokens: 8192
+              },
+              status: id === "gemini-3.6-flash" ? "ACTIVE" : "AVAILABLE"
+            });
+          }
+        }
       }
-    ];
+
+      // Ensure gemini-3.6-flash is present and at the top
+      const has36 = models.some((m) => m.modelId === "gemini-3.6-flash");
+      if (!has36) {
+        models.unshift({
+          modelId: "gemini-3.6-flash",
+          normalizedId: "gemini-3.6-flash",
+          displayName: "Gemini 3.6 Flash (Oficial)",
+          capabilities: {
+            text: true,
+            image: true,
+            pdf: true,
+            structuredOutput: true,
+            reasoning: true,
+            maxInputTokens: 1048576,
+            maxOutputTokens: 8192
+          },
+          status: "ACTIVE"
+        });
+      } else {
+        models.sort((a, b) => (a.modelId === "gemini-3.6-flash" ? -1 : b.modelId === "gemini-3.6-flash" ? 1 : 0));
+      }
+
+      return models;
+    } catch {
+      // Fallback only if list fails
+      return [
+        {
+          modelId: "gemini-3.6-flash",
+          normalizedId: "gemini-3.6-flash",
+          displayName: "Gemini 3.6 Flash",
+          capabilities: {
+            text: true,
+            image: true,
+            pdf: true,
+            structuredOutput: true,
+            reasoning: true,
+            maxInputTokens: 1048576,
+            maxOutputTokens: 8192
+          },
+          status: "ACTIVE"
+        }
+      ];
+    }
   }
 
   public async getModelCapabilities(modelId: string): Promise<ModelCapabilities> {
@@ -110,20 +163,20 @@ export class GeminiProvider implements AIProvider {
     const start = Date.now();
     const effectiveModel = this.normalizeModel(modelId);
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!this.apiKey) {
       return {
         ok: false,
         provider: "google-gemini",
         selectedModel: effectiveModel,
         latencyMs: Date.now() - start,
-        message: "GEMINI_API_KEY no encontrada en las variables de entorno del servidor."
+        message: "Clave de API no configurada para este proveedor."
       };
     }
 
     try {
       if (!this.aiClient) {
         this.aiClient = new GoogleGenAI({
-          apiKey: process.env.GEMINI_API_KEY,
+          apiKey: this.apiKey,
           httpOptions: {
             headers: {
               "User-Agent": "aistudio-build"
@@ -145,7 +198,7 @@ export class GeminiProvider implements AIProvider {
         provider: "google-gemini",
         selectedModel: effectiveModel,
         latencyMs: Date.now() - start,
-        message: ok ? "Conexión exitosa verificada" : "Respuesta inesperada del modelo"
+        message: ok ? `Conexión verificada con ${effectiveModel}` : "Respuesta inesperada del modelo"
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -163,15 +216,15 @@ export class GeminiProvider implements AIProvider {
     const start = Date.now();
     const effectiveModel = this.normalizeModel(request.modelId);
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!this.apiKey) {
       throw new Error(
-        "[PROVIDER_AUTH_ERROR] Falta GEMINI_API_KEY en el entorno del servidor. No se puede ejecutar el análisis documental."
+        "[PROVIDER_AUTH_ERROR] Falta clave de API configurada para Gemini. No se puede ejecutar el análisis documental."
       );
     }
 
     if (!this.aiClient) {
       this.aiClient = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
+        apiKey: this.apiKey,
         httpOptions: {
           headers: {
             "User-Agent": "aistudio-build"
@@ -202,7 +255,7 @@ export class GeminiProvider implements AIProvider {
 
     try {
       const config: Record<string, unknown> = {
-        temperature: 0.1 // High precision for legal-technical extraction
+        temperature: 0.1
       };
 
       if (request.systemInstruction) {
@@ -224,11 +277,10 @@ export class GeminiProvider implements AIProvider {
 
       if (request.jsonSchema || text.trim().startsWith("{") || text.trim().startsWith("[")) {
         try {
-          // Clean possible markdown code fence
           const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
           parsedJson = JSON.parse(cleaned);
         } catch {
-          // If JSON parsing fails, we keep raw text and let semantic validator handle it
+          // Keep raw text
         }
       }
 

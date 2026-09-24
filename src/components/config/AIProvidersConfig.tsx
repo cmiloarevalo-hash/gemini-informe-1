@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Cpu,
   CheckCircle2,
@@ -6,118 +6,192 @@ import {
   RefreshCw,
   Plus,
   Trash2,
-  Edit2,
   Play,
   Key,
   Layers,
   Lock,
-  ExternalLink
+  X,
+  Clock,
+  Server
 } from "lucide-react";
 
-export type CredentialStatus = "VERIFIED" | "IMPLEMENTED_UNVERIFIED" | "ARCHITECTURE_READY" | "BLOCKED";
-
-export interface ProviderCredential {
+export interface PublicCredential {
   id: string;
   provider: "google-gemini" | "openai" | "openrouter" | "openai-compatible";
   alias: string;
-  status: CredentialStatus;
+  maskedKey: string;
+  baseUrl?: string;
   defaultModel: string;
   availableModels: string[];
+  status: "VERIFIED" | "IMPLEMENTED_UNVERIFIED" | "ARCHITECTURE_READY" | "BLOCKED";
   lastTestedAt?: string;
   testLatencyMs?: number;
   testMessage?: string;
 }
 
 export const AIProvidersConfig: React.FC = () => {
-  const [credentials, setCredentials] = useState<ProviderCredential[]>([
-    {
-      id: "cred-gemini-primary",
-      provider: "google-gemini",
-      alias: "Google AI Studio Primary (Official)",
-      status: "VERIFIED",
-      defaultModel: "gemini-3.8-flash",
-      availableModels: ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.1-pro-preview"],
-      lastTestedAt: new Date().toISOString(),
-      testLatencyMs: 342,
-      testMessage: "Conexión exitosa verificada con gemini-3.8-flash."
-    },
-    {
-      id: "cred-openai-secondary",
-      provider: "openai",
-      alias: "OpenAI Fallback Gateway",
-      status: "ARCHITECTURE_READY",
-      defaultModel: "gpt-4o",
-      availableModels: ["gpt-4o", "gpt-4o-mini", "o3-mini"],
-      testMessage: "Arquitectura implementada en ProviderGateway; requiere inyección de credencial de servidor."
-    },
-    {
-      id: "cred-openrouter-tertiary",
-      provider: "openrouter",
-      alias: "OpenRouter Unified Aggregator",
-      status: "ARCHITECTURE_READY",
-      defaultModel: "anthropic/claude-3.5-sonnet",
-      availableModels: ["anthropic/claude-3.5-sonnet", "deepseek/deepseek-r1"],
-      testMessage: "Arquitectura lista; inicie sesión para activar enrutador dinámico."
-    },
-    {
-      id: "cred-compatible-custom",
-      provider: "openai-compatible",
-      alias: "Servidor Local vLLM / Ollama",
-      status: "ARCHITECTURE_READY",
-      defaultModel: "llama-3.3-70b-instruct",
-      availableModels: ["llama-3.3-70b-instruct", "qwen-2.5-72b"],
-      testMessage: "Compatible con endpoints locales conformes con la especificación OpenAI."
-    }
-  ]);
-
+  const [credentials, setCredentials] = useState<PublicCredential[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [refreshingModelsId, setRefreshingModelsId] = useState<string | null>(null);
 
-  const handleTestConnection = async (cred: ProviderCredential) => {
-    setTestingId(cred.id);
-    if (cred.provider === "google-gemini") {
-      try {
-        const res = await fetch("/api/models/test", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ modelId: cred.defaultModel })
-        });
-        const result = await res.json();
-        setCredentials((prev) =>
-          prev.map((c) =>
-            c.id === cred.id
-              ? {
-                  ...c,
-                  status: result.ok ? "VERIFIED" : "BLOCKED",
-                  lastTestedAt: new Date().toISOString(),
-                  testLatencyMs: result.latencyMs,
-                  testMessage: result.message || (result.ok ? "Conexión exitosa" : "Fallo de prueba")
-                }
-              : c
-          )
-        );
-      } catch {
-        //
+  // Form State
+  const [formProvider, setFormProvider] = useState<"google-gemini" | "openai" | "openrouter" | "openai-compatible">("google-gemini");
+  const [formAlias, setFormAlias] = useState("");
+  const [formApiKey, setFormApiKey] = useState("");
+  const [formBaseUrl, setFormBaseUrl] = useState("");
+  const [formDefaultModel, setFormDefaultModel] = useState("gemini-3.6-flash");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formIsSubmitting, setFormIsSubmitting] = useState(false);
+
+  const fetchCredentials = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch("/api/providers");
+      if (res.ok) {
+        const data = await res.json();
+        setCredentials(data);
       }
-    } else {
-      // Non-active providers state
-      setTimeout(() => {
-        setCredentials((prev) =>
-          prev.map((c) =>
-            c.id === cred.id
-              ? {
-                  ...c,
-                  lastTestedAt: new Date().toISOString(),
-                  testMessage: "Proveedor en estado ARCHITECTURE_READY. Configure la API key en el servidor para verificar conexión."
-                }
-              : c
-          )
-        );
-      }, 500);
+    } catch (e) {
+      console.error("Error fetching credentials:", e);
+    } finally {
+      setIsLoading(false);
     }
-    setTestingId(null);
   };
 
-  const getStatusBadge = (status: CredentialStatus) => {
+  useEffect(() => {
+    fetchCredentials();
+  }, []);
+
+  const handleOpenModal = () => {
+    setFormProvider("google-gemini");
+    setFormAlias("");
+    setFormApiKey("");
+    setFormBaseUrl("");
+    setFormDefaultModel("gemini-3.6-flash");
+    setFormError(null);
+    setIsModalOpen(true);
+  };
+
+  const handleProviderChange = (p: typeof formProvider) => {
+    setFormProvider(p);
+    if (p === "google-gemini") {
+      setFormDefaultModel("gemini-3.6-flash");
+    } else if (p === "openai") {
+      setFormDefaultModel("gpt-4o");
+    } else if (p === "openrouter") {
+      setFormDefaultModel("anthropic/claude-3.5-sonnet");
+    } else {
+      setFormDefaultModel("llama-3.3-70b-instruct");
+    }
+  };
+
+  const handleSaveCredential = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formAlias.trim()) {
+      setFormError("El alias de la credencial es requerido.");
+      return;
+    }
+    if (!formApiKey.trim()) {
+      setFormError("La clave de API es requerida.");
+      return;
+    }
+
+    setFormIsSubmitting(true);
+    setFormError(null);
+
+    try {
+      const res = await fetch("/api/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: formProvider,
+          alias: formAlias.trim(),
+          apiKey: formApiKey.trim(),
+          baseUrl: formBaseUrl.trim() || undefined,
+          defaultModel: formDefaultModel.trim() || undefined
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Fallo al guardar credencial");
+      }
+
+      setIsModalOpen(false);
+      await fetchCredentials();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setFormError(msg);
+    } finally {
+      setFormIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteCredential = async (id: string) => {
+    if (!confirm("¿Desea eliminar esta configuración de proveedor?")) return;
+    try {
+      const res = await fetch(`/api/providers/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setCredentials((prev) => prev.filter((c) => c.id !== id));
+      }
+    } catch (e) {
+      console.error("Error deleting credential:", e);
+    }
+  };
+
+  const handleTestConnection = async (id: string) => {
+    setTestingId(id);
+    try {
+      const res = await fetch(`/api/providers/${id}/test`, { method: "POST" });
+      const result = await res.json();
+      setCredentials((prev) =>
+        prev.map((c) =>
+          c.id === id
+            ? {
+                ...c,
+                status: result.ok ? "VERIFIED" : "BLOCKED",
+                lastTestedAt: new Date().toISOString(),
+                testLatencyMs: result.latencyMs,
+                testMessage: result.message
+              }
+            : c
+        )
+      );
+    } catch (e) {
+      console.error("Error testing connection:", e);
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const handleRefreshModels = async (id: string) => {
+    setRefreshingModelsId(id);
+    try {
+      const res = await fetch(`/api/providers/${id}/models`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        const modelIds = data.models ? data.models.map((m: any) => m.modelId) : [];
+        setCredentials((prev) =>
+          prev.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  availableModels: modelIds
+                }
+              : c
+          )
+        );
+      }
+    } catch (e) {
+      console.error("Error refreshing models:", e);
+    } finally {
+      setRefreshingModelsId(null);
+    }
+  };
+
+  const getStatusBadge = (status: PublicCredential["status"]) => {
     switch (status) {
       case "VERIFIED":
         return (
@@ -149,107 +223,290 @@ export const AIProvidersConfig: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-10">
-      <div>
-        <h2 className="text-xl font-bold text-white tracking-tight">Configuración de Proveedores IA</h2>
-        <p className="text-xs text-slate-400">
-          Gestione múltiples credenciales y modelos para Google Gemini, OpenAI, OpenRouter y endpoints compatibles.
+    <div className="space-y-6 max-w-7xl mx-auto pb-10">
+      {/* Top Banner */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+        <div>
+          <h2 className="text-xl font-bold text-white tracking-tight">Proveedores de Inteligencia Artificial</h2>
+          <p className="text-xs text-slate-400">
+            Administración de credenciales de inferencia con almacenamiento seguro en memoria (IN_MEMORY_CREDENTIAL_STORE).
+          </p>
+        </div>
+
+        <button
+          onClick={handleOpenModal}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white shadow-lg shadow-indigo-600/30 transition transform active:scale-95"
+        >
+          <Plus className="h-4 w-4" />
+          <span>+ Agregar API</span>
+        </button>
+      </div>
+
+      {/* Security Architecture Notice */}
+      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 space-y-1">
+        <div className="flex items-center gap-2 text-indigo-400 font-semibold">
+          <Lock className="h-4 w-4" />
+          <span>Seguridad y Cero Exposición de API Keys</span>
+        </div>
+        <p className="text-slate-400 text-[11px] leading-relaxed">
+          Las claves de API se transmiten mediante canal cifrado directamente al servidor y se mantienen únicamente en
+          memoria durante el ciclo de vida del proceso (<code className="text-indigo-300 font-mono">IN_MEMORY_CREDENTIAL_STORE</code>).
+          Ninguna clave se persiste en localStorage, sessionStorage ni se expone al navegador.
         </p>
       </div>
 
-      {/* Rules Notice */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 flex items-start gap-3">
-        <Lock className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-semibold text-slate-200">Seguridad & Aislamiento de Credenciales (Server-Side)</p>
-          <p className="text-slate-400 text-[11px] leading-relaxed">
-            Las claves maestras residen exclusivamente en las variables de entorno del servidor. Ninguna API key es
-            transmitida al navegador. Los modelos se actualizan dinámicamente llamando a los endpoints de metadatos oficiales.
+      {/* Credentials List */}
+      {isLoading ? (
+        <div className="p-12 text-center text-slate-500 text-xs">Cargando proveedores configurados...</div>
+      ) : credentials.length === 0 ? (
+        /* Task 4: Con cero credenciales mostrar mensaje */
+        <div className="p-12 text-center border border-dashed border-slate-800 rounded-2xl bg-slate-900/40 space-y-3">
+          <Cpu className="h-10 w-10 text-slate-600 mx-auto" />
+          <h3 className="text-sm font-semibold text-slate-300">No hay proveedores configurados.</h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            Agrega tu clave de API de Google Gemini para habilitar el análisis de documentos y extracción fáctica.
           </p>
-        </div>
-      </div>
-
-      {/* Credentials Cards Grid */}
-      <div className="space-y-4">
-        {credentials.map((cred) => (
-          <div
-            key={cred.id}
-            className="p-5 rounded-2xl bg-slate-900/50 border border-slate-800 hover:border-slate-700/80 transition space-y-4"
+          <button
+            onClick={handleOpenModal}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white transition mt-2"
           >
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs">
-                  <Cpu className="h-4 w-4" />
-                </div>
+            <Plus className="h-4 w-4" />
+            <span>+ Agregar API</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {credentials.map((cred) => (
+            <div
+              key={cred.id}
+              className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800 hover:border-slate-700/80 transition space-y-4 shadow-sm"
+            >
+              {/* Card Header */}
+              <div className="flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-bold text-white">{cred.alias}</h3>
-                    <span className="text-xs text-slate-500 font-mono">({cred.provider})</span>
+                    {getStatusBadge(cred.status)}
                   </div>
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    Modelo Predeterminado: <strong className="text-indigo-400">{cred.defaultModel}</strong>
+                  <p className="text-[11px] text-slate-400 font-mono mt-0.5 capitalize">
+                    {cred.provider.replace("-", " ")}
                   </p>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-2">
-                {getStatusBadge(cred.status)}
-              </div>
-            </div>
-
-            {/* Models list & Details */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div>
-                <p className="text-slate-400 text-[11px] mb-1.5 font-medium">Modelos Disponibles (Dinámicos):</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {cred.availableModels.map((m) => (
-                    <span
-                      key={m}
-                      className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
-                        m === cred.defaultModel
-                          ? "bg-indigo-600/20 text-indigo-300 border-indigo-500/30 font-semibold"
-                          : "bg-slate-950 text-slate-400 border-slate-800"
-                      }`}
-                    >
-                      {m}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-slate-400 text-[11px] mb-1.5 font-medium">Última Prueba & Diagnóstico:</p>
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 font-mono text-[11px] space-y-1">
-                  <div className="flex items-center justify-between text-slate-400 text-[10px]">
-                    <span>{cred.lastTestedAt ? new Date(cred.lastTestedAt).toLocaleTimeString("es-CL") : "Nunca"}</span>
-                    {cred.testLatencyMs !== undefined && (
-                      <span className="text-emerald-400 font-bold">{cred.testLatencyMs} ms</span>
-                    )}
-                  </div>
-                  <p className="text-slate-300 text-[11px]">{cred.testMessage || "Listo para probar conexión."}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Actions Bar */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
-              <span className="text-[11px] text-slate-500 font-mono">ID: {cred.id}</span>
-
-              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleTestConnection(cred)}
-                  disabled={testingId === cred.id}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs transition shadow-sm"
+                  onClick={() => handleDeleteCredential(cred.id)}
+                  className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition"
+                  title="Eliminar credencial"
                 >
-                  <Play className="h-3 w-3 fill-white" />
-                  <span>{testingId === cred.id ? "Probando..." : "Probar Conexión"}</span>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Specs Grid */}
+              <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
+                <div>
+                  <span className="text-[10px] text-slate-500 block">Clave Protegida:</span>
+                  <span className="text-slate-300 font-semibold">{cred.maskedKey}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 block">Modelo Predeterminado:</span>
+                  <span className="text-indigo-400 font-semibold">{cred.defaultModel}</span>
+                </div>
+                {cred.baseUrl && (
+                  <div className="col-span-2">
+                    <span className="text-[10px] text-slate-500 block">Base URL:</span>
+                    <span className="text-slate-400 truncate block">{cred.baseUrl}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Models discovery list */}
+              <div>
+                <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5">
+                  <span className="flex items-center gap-1 font-medium">
+                    <Layers className="h-3 w-3 text-indigo-400" />
+                    Modelos Detectados ({cred.availableModels?.length || 0})
+                  </span>
+                  <button
+                    onClick={() => handleRefreshModels(cred.id)}
+                    disabled={refreshingModelsId === cred.id}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition"
+                    title="Actualizar modelos reales consultando a la API"
+                  >
+                    <RefreshCw className={`h-2.5 w-2.5 ${refreshingModelsId === cred.id ? "animate-spin" : ""}`} />
+                    <span>Actualizar modelos</span>
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {cred.availableModels && cred.availableModels.length > 0 ? (
+                    cred.availableModels.slice(0, 4).map((m) => (
+                      <span
+                        key={m}
+                        className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300 border border-slate-700/60"
+                      >
+                        {m}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[10px] text-slate-500 italic">No hay modelos descubiertos aún</span>
+                  )}
+                  {cred.availableModels && cred.availableModels.length > 4 && (
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800/50 text-[10px] font-mono text-slate-500">
+                      +{cred.availableModels.length - 4} más
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Test Message / Latency */}
+              {cred.testMessage && (
+                <p className="text-[11px] text-slate-400 bg-slate-950/40 p-2 rounded-lg border border-slate-800/40">
+                  {cred.testMessage}
+                  {cred.testLatencyMs !== undefined && (
+                    <span className="text-slate-500 ml-1.5 font-mono">({cred.testLatencyMs} ms)</span>
+                  )}
+                </p>
+              )}
+
+              {/* Card Footer Actions */}
+              <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+                <span className="text-[10px] text-slate-500">
+                  {cred.lastTestedAt
+                    ? `Verificado: ${new Date(cred.lastTestedAt).toLocaleTimeString("es-CL")}`
+                    : "No verificado"}
+                </span>
+
+                <button
+                  onClick={() => handleTestConnection(cred.id)}
+                  disabled={testingId === cred.id}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 transition"
+                >
+                  <Play className={`h-3 w-3 fill-slate-300 ${testingId === cred.id ? "animate-pulse" : ""}`} />
+                  <span>{testingId === cred.id ? "Probando..." : "Probar conexión"}</span>
                 </button>
               </div>
             </div>
+          ))}
+        </div>
+      )}
+
+      {/* Modal: Agregar API (Task 4) */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Key className="h-5 w-5 text-indigo-400" />
+                <h3 className="text-base font-bold text-white">Agregar Proveedor de IA</h3>
+              </div>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveCredential} className="space-y-4 text-xs">
+              {/* Proveedor */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-semibold block">Proveedor:</label>
+                <select
+                  value={formProvider}
+                  onChange={(e) => handleProviderChange(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-medium focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="google-gemini">Google Gemini (Recomendado / Nativo)</option>
+                  <option value="openai">OpenAI (Architecture Ready)</option>
+                  <option value="openrouter">OpenRouter (Architecture Ready)</option>
+                  <option value="openai-compatible">OpenAI-compatible (vLLM / Ollama)</option>
+                </select>
+              </div>
+
+              {/* Alias */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-semibold block">Alias:</label>
+                <input
+                  type="text"
+                  placeholder="ej. Gemini 3.6 Producción"
+                  value={formAlias}
+                  onChange={(e) => setFormAlias(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+
+              {/* API Key */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-semibold block">API Key:</label>
+                <input
+                  type="password"
+                  placeholder="••••••••••••••••••••••••••••••••"
+                  value={formApiKey}
+                  onChange={(e) => setFormApiKey(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                  required
+                />
+                <span className="text-[10px] text-slate-500 block">
+                  Se resguardará exclusivamente en memoria del servidor.
+                </span>
+              </div>
+
+              {/* Base URL (when applicable) */}
+              {(formProvider === "openrouter" || formProvider === "openai-compatible") && (
+                <div className="space-y-1.5">
+                  <label className="text-slate-300 font-semibold block">Base URL:</label>
+                  <input
+                    type="url"
+                    placeholder="https://api.openrouter.ai/v1 o http://localhost:11434/v1"
+                    value={formBaseUrl}
+                    onChange={(e) => setFormBaseUrl(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              )}
+
+              {/* Modelo predeterminado */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-semibold block">Modelo Predeterminado:</label>
+                <input
+                  type="text"
+                  value={formDefaultModel}
+                  onChange={(e) => setFormDefaultModel(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+
+              {/* Botones: [ Guardar ] [ Cancelar ] */}
+              <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={formIsSubmitting}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold transition shadow-md shadow-indigo-600/30"
+                >
+                  {formIsSubmitting ? "Guardando..." : "Guardar"}
+                </button>
+              </div>
+            </form>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-export type AIProviderType = "google-gemini" | "openai" | "openrouter";
+export type AIProviderType = "google-gemini" | "openai" | "openrouter" | "openai-compatible";
 
 export interface ModelCapabilities {
   text: boolean;
