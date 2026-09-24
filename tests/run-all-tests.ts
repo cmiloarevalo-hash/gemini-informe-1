@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import { DocumentService } from "../src/core/documents/document.service";
 import { EvidenceGate, EvidenceGateError } from "../src/core/evidence/evidence.gate";
 import { SecurityGuard } from "../src/core/security/security.guard";
-import { GeminiProvider } from "../src/core/providers/gemini.provider";
+import { GeminiProvider, GeminiProviderError, isRetryableStatus } from "../src/core/providers/gemini.provider";
 import { CredentialStore } from "../src/core/providers/credential.store";
 import { TopographyArithmetic } from "../src/modules/topography/arithmetic";
 import { DocxReportGenerator } from "../src/core/reports/docx.generator";
@@ -225,6 +225,166 @@ async function runTests() {
     prohibitedRejected = true;
   }
   assert(prohibitedRejected, "T-AI-003", "Rechazo estricto de modelos deprecados prohibidos (gemini-1.5-*)");
+
+  // ==========================================
+  // PRUEBAS DE RESILIENCIA Y RETRY DE PROVEEDOR
+  // ==========================================
+
+  // T-RETRY-001: Primer intento 503, segundo intento 503, tercero SUCCESS → resultado SUCCESS
+  let retry503Calls = 0;
+  const mock503Client = {
+    models: {
+      generateContent: async () => {
+        retry503Calls++;
+        if (retry503Calls < 3) {
+          const err: any = new Error("This model is currently experiencing high demand. HTTP 503 status: UNAVAILABLE");
+          err.status = 503;
+          throw err;
+        }
+        return { text: JSON.stringify({ status: "SUCCESS" }) };
+      }
+    }
+  };
+  const retryProvider503 = new GeminiProvider("dummy-key", { baseDelayMs: 1, jitterMs: 0 });
+  retryProvider503.setClient(mock503Client);
+
+  const retry503Response = await retryProvider503.analyze({
+    prompt: "Test 503 transient recovery",
+    modelId: "gemini-3.6-flash"
+  });
+  assert(
+    retry503Calls === 3 && (retry503Response.parsedJson as any)?.status === "SUCCESS",
+    "T-RETRY-001",
+    "Retry 503: Intento 1 (503), Intento 2 (503), Intento 3 (SUCCESS) → resultado SUCCESS"
+  );
+
+  // T-RETRY-002: 4 intentos con 503 → PROVIDER_TEMPORARILY_UNAVAILABLE estructurado
+  let exhausted503Calls = 0;
+  const mockExhausted503Client = {
+    models: {
+      generateContent: async () => {
+        exhausted503Calls++;
+        const err: any = new Error("This model is currently experiencing high demand. HTTP 503 status: UNAVAILABLE");
+        err.status = 503;
+        throw err;
+      }
+    }
+  };
+  const exhaustedProvider = new GeminiProvider("dummy-key", { maxAttempts: 4, baseDelayMs: 1, jitterMs: 0 });
+  exhaustedProvider.setClient(mockExhausted503Client);
+
+  let structuredErrorCaught: any = null;
+  try {
+    await exhaustedProvider.analyze({
+      prompt: "Test 503 exhaustion",
+      modelId: "gemini-3.6-flash"
+    });
+  } catch (err: any) {
+    structuredErrorCaught = err;
+  }
+
+  assert(
+    exhausted503Calls === 4 &&
+    structuredErrorCaught instanceof GeminiProviderError &&
+    structuredErrorCaught.code === "PROVIDER_TEMPORARILY_UNAVAILABLE" &&
+    structuredErrorCaught.provider === "google-gemini" &&
+    structuredErrorCaught.modelId === "gemini-3.6-flash" &&
+    structuredErrorCaught.retryable === true &&
+    structuredErrorCaught.attempts === 4,
+    "T-RETRY-002",
+    "4 intentos con 503 → error estructurado PROVIDER_TEMPORARILY_UNAVAILABLE (attempts=4, retryable=true, provider=google-gemini, modelId=gemini-3.6-flash)"
+  );
+
+  // T-RETRY-003: 400 (Client error / Bad Request) → no retry
+  let clientError400Calls = 0;
+  const mock400Client = {
+    models: {
+      generateContent: async () => {
+        clientError400Calls++;
+        const err: any = new Error("Invalid argument: Bad Request HTTP 400");
+        err.status = 400;
+        throw err;
+      }
+    }
+  };
+  const provider400 = new GeminiProvider("dummy-key", { maxAttempts: 4, baseDelayMs: 1, jitterMs: 0 });
+  provider400.setClient(mock400Client);
+
+  let error400Caught: any = null;
+  try {
+    await provider400.analyze({
+      prompt: "Test 400 no retry",
+      modelId: "gemini-3.6-flash"
+    });
+  } catch (err: any) {
+    error400Caught = err;
+  }
+
+  assert(
+    clientError400Calls === 1 &&
+    error400Caught instanceof GeminiProviderError &&
+    error400Caught.retryable === false &&
+    error400Caught.attempts === 1,
+    "T-RETRY-003",
+    "Error 400: No retry (falla de inmediato en intento 1 sin reintentos)"
+  );
+
+  // T-RETRY-004: Retry 429 (Rate Limit / Resource Exhausted)
+  let retry429Calls = 0;
+  const mock429Client = {
+    models: {
+      generateContent: async () => {
+        retry429Calls++;
+        if (retry429Calls < 2) {
+          const err: any = new Error("Resource exhausted: Rate limit exceeded HTTP 429");
+          err.status = 429;
+          throw err;
+        }
+        return { text: JSON.stringify({ status: "SUCCESS" }) };
+      }
+    }
+  };
+  const provider429 = new GeminiProvider("dummy-key", { maxAttempts: 4, baseDelayMs: 1, jitterMs: 0 });
+  provider429.setClient(mock429Client);
+
+  const retry429Response = await provider429.analyze({
+    prompt: "Test 429 recovery",
+    modelId: "gemini-3.6-flash"
+  });
+
+  assert(
+    retry429Calls === 2 && (retry429Response.parsedJson as any)?.status === "SUCCESS",
+    "T-RETRY-004",
+    "Retry 429: Recuperación exitosa en segundo intento tras rate limit transitorio"
+  );
+
+  // T-RETRY-005: Verificación de política de backoff aproximado y jitter acotado
+  const standardRetryProvider = new GeminiProvider("dummy-key");
+  const delay1 = standardRetryProvider.calculateBackoffDelay(0); // ~1s + jitter
+  const delay2 = standardRetryProvider.calculateBackoffDelay(1); // ~2s + jitter
+  const delay3 = standardRetryProvider.calculateBackoffDelay(2); // ~4s + jitter
+  const retryOpts = standardRetryProvider.getRetryOptions();
+
+  assert(
+    delay1 >= 1000 && delay1 <= 1300 &&
+    delay2 >= 2000 && delay2 <= 2300 &&
+    delay3 >= 4000 && delay3 <= 4300 &&
+    retryOpts.maxAttempts === 4,
+    "T-RETRY-005",
+    "Política de backoff: attempt 1 inmediato, retry 1 ~1s+jitter, retry 2 ~2s+jitter, retry 3 ~4s+jitter, maxAttempts=4"
+  );
+
+  // T-RETRY-006: Clasificación estricta de códigos retryable vs no-retry
+  const retryableStatuses = [408, 429, 500, 502, 503, 504];
+  const nonRetryableStatuses = [400, 401, 403, 404, 422];
+  const allRetryableMatch = retryableStatuses.every((s) => isRetryableStatus(s));
+  const allNonRetryableMatch = nonRetryableStatuses.every((s) => !isRetryableStatus(s));
+
+  assert(
+    allRetryableMatch && allNonRetryableMatch,
+    "T-RETRY-006",
+    "Clasificación exacta de estados: 408,429,500,502,503,504 (RETRYABLE) vs 400,401,403,404,422 (NO RETRY)"
+  );
 
   // T-CRED-001: Credential store in-memory masks raw API keys (Task 5 & 6)
   const cred = CredentialStore.addCredential({
