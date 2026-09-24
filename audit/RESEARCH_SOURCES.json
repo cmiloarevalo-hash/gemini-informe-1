@@ -1,0 +1,71 @@
+[
+  {
+    "id": "SRC-001",
+    "date": "2026-09-23",
+    "product": "Google Gen AI SDK",
+    "sdk": "@google/genai",
+    "api": "Gemini Developer API",
+    "version": "2.4.0",
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+    "capabilities": ["text", "pdf", "images", "structured-json", "streaming"],
+    "limits": {
+      "inlineDataBytes": 20971520,
+      "maxOutputTokens": 8192
+    },
+    "authentication": "GEMINI_API_KEY server-side environment variable",
+    "costsFreeTier": "Free tier available on Google AI Studio without billing activation",
+    "officialSource": "https://ai.google.dev/docs/gemini_api_overview",
+    "decisionAdopted": "Adopted server-side initialization via Express server.ts with httpOptions User-Agent aistudio-build and fallback model negotiation."
+  },
+  {
+    "id": "SRC-002",
+    "date": "2026-09-23",
+    "product": "Google Gemini Models",
+    "sdk": "@google/genai",
+    "api": "Models API",
+    "version": "v1beta",
+    "endpoint": "models/gemini-3.8-flash & models/gemini-3.1-pro-preview",
+    "capabilities": ["multimodal-reasoning", "complex-text", "pdf-understanding"],
+    "limits": {
+      "contextWindowTokens": 1048576
+    },
+    "authentication": "Bearer / x-goog-api-key",
+    "costsFreeTier": "Included in standard free allocation",
+    "officialSource": "https://ai.google.dev/models/gemini",
+    "decisionAdopted": "Supports gemini-3.8-flash and gemini-3.6-flash alias dynamically, rejecting deprecated gemini-1.5-* / 2.0-* models."
+  },
+  {
+    "id": "SRC-003",
+    "date": "2026-09-23",
+    "product": "Google Drive API / Google Picker",
+    "sdk": "gapi.client.drive / google.picker",
+    "api": "Google Drive REST API",
+    "version": "v3",
+    "endpoint": "https://www.googleapis.com/drive/v3",
+    "capabilities": ["file-metadata", "file-download", "picker-ui"],
+    "limits": {
+      "scope": "https://www.googleapis.com/auth/drive.file"
+    },
+    "authentication": "OAuth 2.0 User Token",
+    "costsFreeTier": "Free with Google Workspace/Gmail standard accounts",
+    "officialSource": "https://developers.google.com/drive/api/guides/about-sdk",
+    "decisionAdopted": "Configured as ARCHITECTURE_READY in prototype mode; requires user OAuth provisioning when connecting external accounts, with strict minimum scope drive.file."
+  },
+  {
+    "id": "SRC-004",
+    "date": "2026-09-23",
+    "product": "DOCX Engine",
+    "sdk": "docx",
+    "api": "Document Generation Object Model",
+    "version": "9.1.1+",
+    "endpoint": "Local in-memory generation",
+    "capabilities": ["tables", "styles", "paragraphs", "annexes", "headers", "footers"],
+    "limits": {
+      "memory": "Bounded by Node.js buffer limits"
+    },
+    "authentication": "None (pure algorithm)",
+    "costsFreeTier": "Open source (zero cost)",
+    "officialSource": "https://docx.js.org/",
+    "decisionAdopted": "Generate validated .docx strictly from approved CentralAnalysis JSON that has passed Evidence Gate and Critical Review."
+  }
+]

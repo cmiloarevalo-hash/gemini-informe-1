@@ -1,0 +1,59 @@
+{
+  "provider": "google-gemini",
+  "discoveredAt": "2026-09-23T18:42:00Z",
+  "activeModel": "gemini-3.8-flash",
+  "supportedModels": [
+    {
+      "modelId": "gemini-3.8-flash",
+      "normalizedId": "gemini-3.8-flash",
+      "displayName": "Gemini 3.8 Flash (Vigente / Recomendado)",
+      "capabilities": {
+        "text": true,
+        "image": true,
+        "pdf": true,
+        "structuredOutput": true,
+        "reasoning": true,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "status": "VERIFIED_ACTIVE"
+    },
+    {
+      "modelId": "gemini-3.6-flash",
+      "normalizedId": "gemini-3.6-flash",
+      "displayName": "Gemini 3.6 Flash (Certificado en Especificación)",
+      "capabilities": {
+        "text": true,
+        "image": true,
+        "pdf": true,
+        "structuredOutput": true,
+        "reasoning": true,
+        "maxInputTokens": 1048576,
+        "maxOutputTokens": 8192
+      },
+      "status": "SUPPORTED_ALIAS"
+    },
+    {
+      "modelId": "gemini-3.1-pro-preview",
+      "normalizedId": "gemini-3.1-pro-preview",
+      "displayName": "Gemini 3.1 Pro Preview (Razonamiento Complejo)",
+      "capabilities": {
+        "text": true,
+        "image": true,
+        "pdf": true,
+        "structuredOutput": true,
+        "reasoning": true,
+        "maxInputTokens": 2097152,
+        "maxOutputTokens": 8192
+      },
+      "status": "SUPPORTED_PAID_OR_DEV"
+    }
+  ],
+  "prohibitedModels": [
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-pro"
+  ]
+}

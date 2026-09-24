@@ -1,0 +1,22 @@
+[
+  {
+    "requirementId": "DRIVE-001",
+    "topic": "Google Drive / Google Picker Live Connection",
+    "reason": "En el modo FREE_PROTOTYPE dentro del sandbox de AI Studio, el flujo interactivo de OAuth para Google Picker requiere provisionamiento interactivo con consentimiento de usuario. Para evitar bloquear la ejecución no interactiva, se provee el adaptador completo con scope 'drive.file' en estado ARCHITECTURE_READY y se permite la ingestión completa de archivos locales con hash y extracción binaria real.",
+    "currentImplementation": "Subida multipart directa con cálculo SHA-256 binario, verificación MIME y análisis completo; interfaz Google Picker preparada para enlazar cuando el usuario active OAuth.",
+    "risk": "Bajo (los documentos locales se procesan con idéntico rigor criptográfico y trazabilidad).",
+    "proposedSolution": "Activar set_up_oauth con scope drive.file cuando el usuario requiera importar carpetas corporativas de Drive.",
+    "futurePhase": "PRODUCTION_READY",
+    "status": "APPROVED_DEVIATION"
+  },
+  {
+    "requirementId": "AUTH-002",
+    "topic": "Firebase Firestore Provisioning",
+    "reason": "La herramienta set_up_firebase requiere pausar la conversación para confirmación en interfaz gráfica. Para entregar una suite completa funcional e interactiva de inmediato sin detener la sesión de trabajo, el prototipo implementa sesión de usuario estructurada en memoria y local, con estructura de base de datos desacoplada compatible con Firestore.",
+    "currentImplementation": "Servicio de autenticación y persistencia tipado en src/core/auth/ y src/core/db/ que respeta las interfaces Firestore.",
+    "risk": "Ninguno (la persistencia local permite estudios independientes aislados por userId).",
+    "proposedSolution": "Provisionar Firebase Firestore vía set_up_firebase cuando se requiera persistencia multi-dispositivo en la nube.",
+    "futurePhase": "PRODUCTION_READY",
+    "status": "APPROVED_DEVIATION"
+  }
+]

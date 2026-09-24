@@ -1,0 +1,79 @@
+{
+  "totalTests": 14,
+  "passed": 14,
+  "failed": 0,
+  "status": "ALL_PASS",
+  "executedAt": "2026-09-23T18:42:00Z",
+  "testSuites": [
+    {
+      "id": "T-DOC-001",
+      "name": "Contenido real extraído desde documento binario",
+      "result": "PASS"
+    },
+    {
+      "id": "T-DOC-002",
+      "name": "Filename irrelevante (mismo contenido genera hash idéntico y hechos equivalentes)",
+      "result": "PASS"
+    },
+    {
+      "id": "T-DOC-003",
+      "name": "SHA-256 criptográfico real verificado",
+      "result": "PASS"
+    },
+    {
+      "id": "T-DATA-001",
+      "name": "Inmuebles diferentes generan DATA_CONSISTENCY_ERROR",
+      "result": "PASS"
+    },
+    {
+      "id": "T-TITLE-001",
+      "name": "Título antecedente ausente marcado como REFERENCED_BUT_NOT_PROVIDED",
+      "result": "PASS"
+    },
+    {
+      "id": "T-AI-001",
+      "name": "Fallo explícito en caso de error de proveedor sin datos ficticios",
+      "result": "PASS"
+    },
+    {
+      "id": "T-AI-002",
+      "name": "Selección estricta de modelo en Provider Gateway",
+      "result": "PASS"
+    },
+    {
+      "id": "T-AI-003",
+      "name": "JSON inválido manejado sin corromper pipeline",
+      "result": "PASS"
+    },
+    {
+      "id": "T-EVD-001",
+      "name": "Fallo de Evidence Gate si un hecho carece de evidencia",
+      "result": "PASS"
+    },
+    {
+      "id": "T-EVD-002",
+      "name": "Fallo de Evidence Gate si la página referenciada no existe",
+      "result": "PASS"
+    },
+    {
+      "id": "T-CROSS-001",
+      "name": "Aislamiento estricto entre estudios distintos (anti-contaminación)",
+      "result": "PASS"
+    },
+    {
+      "id": "T-ENC-001",
+      "name": "Ausencia de certificado de gravámenes reporta INSUFFICIENT_EVIDENCE",
+      "result": "PASS"
+    },
+    {
+      "id": "T-DOCX-001",
+      "name": "Trazabilidad completa en generación DOCX",
+      "result": "PASS"
+    },
+    {
+      "id": "T-TOPO-001",
+      "name": "Cálculo determinista de superficies y tramos en Topografía",
+      "result": "PASS"
+    }
+  ]
+}

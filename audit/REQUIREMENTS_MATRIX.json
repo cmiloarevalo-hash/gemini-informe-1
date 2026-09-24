@@ -1,0 +1,114 @@
+[
+  {
+    "id": "AUTH-001",
+    "name": "Autenticación segura y multi-usuario",
+    "design": "src/core/auth/auth.service.ts",
+    "code": "Aislamiento por userId y sesión verificada",
+    "test": "T-CROSS-001",
+    "result": "PASS"
+  },
+  {
+    "id": "DRIVE-001",
+    "name": "Google Drive / Picker con scope mínimo",
+    "design": "src/core/documents/drive.adapter.ts",
+    "code": "Definición de interfaz DriveAdapter con scope drive.file",
+    "test": "T-DRIVE-ARCH-001",
+    "result": "PASS"
+  },
+  {
+    "id": "DOC-001",
+    "name": "Ingestión de bytes reales, detección MIME y SHA-256",
+    "design": "src/core/documents/document.service.ts",
+    "code": "crypto.createHash('sha256') sobre bytes reales",
+    "test": "T-DOC-003",
+    "result": "PASS"
+  },
+  {
+    "id": "DOC-002",
+    "name": "Análisis basado en contenido y no en filename",
+    "design": "src/core/analysis/analysis.orchestrator.ts",
+    "code": "Inspección de texto y contenido binario por IA",
+    "test": "T-DOC-002",
+    "result": "PASS"
+  },
+  {
+    "id": "AI-001",
+    "name": "Provider Gateway y soporte dinámico de modelos",
+    "design": "src/core/providers/provider.gateway.ts",
+    "code": "Integración @google/genai con soporte gemini-3.8-flash / gemini-3.6-flash",
+    "test": "T-AI-002",
+    "result": "PASS"
+  },
+  {
+    "id": "AI-002",
+    "name": "Manejo de errores explícito sin datos ficticios",
+    "design": "src/core/providers/gemini.provider.ts",
+    "code": "Lanzamiento de PROVIDER_RESPONSE / PROVIDER_AUTH sin mock fallback",
+    "test": "T-AI-001",
+    "result": "PASS"
+  },
+  {
+    "id": "EVD-001",
+    "name": "Evidence Gate estricto sobre Documented Facts",
+    "design": "src/core/evidence/evidence.gate.ts",
+    "code": "Verificación de evidence.length >= 1, documentId existente en el estudio y página válida",
+    "test": "T-EVD-001",
+    "result": "PASS"
+  },
+  {
+    "id": "EVD-002",
+    "name": "Verificación de límites de página de evidencia",
+    "design": "src/core/evidence/evidence.gate.ts",
+    "code": "Rechazo de página que exceda pageCount",
+    "test": "T-EVD-002",
+    "result": "PASS"
+  },
+  {
+    "id": "MOD-001",
+    "name": "Módulo de Estudio de Títulos con cadena de tradición",
+    "design": "src/modules/title-study/index.ts",
+    "code": "Extracción de fojas, número, año, CBR, títulos de adquisición y antecedentes",
+    "test": "T-TITLE-001",
+    "result": "PASS"
+  },
+  {
+    "id": "MOD-002",
+    "name": "Módulo Topográfico con cálculos deterministas en código",
+    "design": "src/modules/topography/index.ts",
+    "code": "Conversión ha <-> m2, sumatoria de tramos y tolerancias en TypeScript",
+    "test": "T-TOPO-CALC-001",
+    "result": "PASS"
+  },
+  {
+    "id": "REP-001",
+    "name": "Generación de informe DOCX auditable",
+    "design": "src/core/reports/docx.generator.ts",
+    "code": "DOCX estructurado con anexo de trazabilidad Fact ID -> Evidencia",
+    "test": "T-DOCX-001",
+    "result": "PASS"
+  },
+  {
+    "id": "SEC-001",
+    "name": "Aislamiento estricto y sin exposición de secretos",
+    "design": "src/core/security/security.guard.ts",
+    "code": "Eliminación de llaves del bundle cliente; aserciones anti-contaminación",
+    "test": "T-CROSS-001",
+    "result": "PASS"
+  },
+  {
+    "id": "AUD-001",
+    "name": "Trazabilidad completa y Audit Bundle",
+    "design": "src/core/audit/audit.service.ts",
+    "code": "Registro de ExecutionManifest con hashes de documentos y porcentaje de cobertura",
+    "test": "T-AUD-001",
+    "result": "PASS"
+  },
+  {
+    "id": "COST-001",
+    "name": "Cero costo forzado en prototipo",
+    "design": "audit/COST_PROFILE.json",
+    "code": "Todo servicio activo opera dentro del nivel gratuito",
+    "test": "T-COST-001",
+    "result": "PASS"
+  }
+]

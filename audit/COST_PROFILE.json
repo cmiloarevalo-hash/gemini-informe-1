@@ -1,0 +1,50 @@
+[
+  {
+    "service": "Google Gemini API (Developer Tier)",
+    "purpose": "Análisis documental real multimodal (PDF, imágenes, transcripción estructurada)",
+    "requiresBilling": false,
+    "freeTier": "Free tier activo en Google AI Studio (cuota por minuto/día)",
+    "prototypeAlternative": "Uso de gemini-3.8-flash / gemini-3.6-flash dentro de cuotas gratuitas",
+    "status": "ACTIVE_FREE"
+  },
+  {
+    "service": "Express Server & Local Buffer Ingestion",
+    "purpose": "Cálculo real de SHA-256, conteo de páginas y orquestación de Evidence Gate",
+    "requiresBilling": false,
+    "freeTier": "Ejecución local en Cloud Run Dev Sandbox (gratis)",
+    "prototypeAlternative": "Document Core en Node.js local sin Cloud Storage de pago",
+    "status": "ACTIVE_FREE"
+  },
+  {
+    "service": "Google Drive / Google Picker",
+    "purpose": "Repositorio remoto de documentos de estudio para evitar Cloud Storage con billing",
+    "requiresBilling": false,
+    "freeTier": "15 GB por cuenta de Google personal gratuita",
+    "prototypeAlternative": "Subida directa de archivos locales + Google Drive vía OAuth Picker",
+    "status": "ARCHITECTURE_READY"
+  },
+  {
+    "service": "DOCX Report Generator Engine",
+    "purpose": "Generación determinista de informes Word (.docx) con anexos de trazabilidad",
+    "requiresBilling": false,
+    "freeTier": "Biblioteca open-source en memoria",
+    "prototypeAlternative": "docx npm library ejecutada en runtime del servidor o navegador",
+    "status": "ACTIVE_FREE"
+  },
+  {
+    "service": "Firebase Authentication & Firestore",
+    "purpose": "Persistencia en la nube multi-dispositivo y autenticación federada Google",
+    "requiresBilling": false,
+    "freeTier": "Spark Plan (50K lecturas/día, 20K escrituras/día sin costo)",
+    "prototypeAlternative": "Persistencia de estado en memoria del servidor + IndexedDB/Storage de navegador para FREE_PROTOTYPE; extensible a Firestore",
+    "status": "ARCHITECTURE_READY"
+  },
+  {
+    "service": "Secret Manager & Cloud KMS",
+    "purpose": "Cifrado de credenciales de terceros (OpenAI / OpenRouter / llaves corporativas)",
+    "requiresBilling": true,
+    "freeTier": "6 versiones de secretos gratis, pero requiere activación de Billing en GCP",
+    "prototypeAlternative": "Variables de entorno server-side (process.env.GEMINI_API_KEY) sin exponer secretos a cliente",
+    "status": "ARCHITECTURE_READY"
+  }
+]

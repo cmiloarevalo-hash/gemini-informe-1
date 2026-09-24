@@ -1,0 +1,18 @@
+{
+  "bundleVersion": "1.0.0",
+  "generatedAt": "2026-09-23T18:42:00Z",
+  "files": [
+    "audit/AUDIT_INDEX.json",
+    "audit/BUILD_MANIFEST.json",
+    "audit/CAPABILITIES.json",
+    "audit/COST_PROFILE.json",
+    "audit/DEVIATIONS.json",
+    "audit/MODEL_DISCOVERY.json",
+    "audit/REQUIREMENTS_MATRIX.json",
+    "audit/RESEARCH_SOURCES.json",
+    "audit/SECURITY_STATUS.json",
+    "audit/TEST_SUMMARY.json"
+  ],
+  "verificationCommand": "npm run audit",
+  "noMocksCheckCommand": "npm run audit:no-mocks"
+}

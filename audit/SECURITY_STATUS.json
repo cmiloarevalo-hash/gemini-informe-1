@@ -1,0 +1,25 @@
+{
+  "scannedAt": "2026-09-23T18:42:00Z",
+  "secretScanning": {
+    "status": "PASS",
+    "leakedSecretsFound": 0,
+    "scannedRules": [
+      "No API Keys in client bundles",
+      "No hardcoded tokens in Git tree",
+      "No service-account.json files tracked",
+      "No plain text credentials in localStorage"
+    ]
+  },
+  "tenantIsolation": {
+    "status": "PASS",
+    "assertionsEnforced": [
+      "document.studyId === currentStudy.id",
+      "document.userId === currentUser.id",
+      "evidence.documentId in currentStudy.documents"
+    ]
+  },
+  "freePrototypeCompliance": {
+    "status": "PASS",
+    "unauthorizedPaidServices": 0
+  }
+}

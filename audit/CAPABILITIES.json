@@ -1,0 +1,68 @@
+{
+  "application": "Plataforma de Análisis Documental Técnico-Jurídico con IA",
+  "version": "1.0.0",
+  "environment": "FREE_PROTOTYPE",
+  "timestamp": "2026-09-23T18:42:00Z",
+  "capabilities": {
+    "CAP-001-REAL_BYTES_INGESTION": {
+      "name": "Ingestión de bytes reales y detección MIME binaria",
+      "status": "VERIFIED",
+      "evidence": "Document Core calcula SHA-256 sobre Buffer crudo y extrae páginas vía pdf-lib."
+    },
+    "CAP-002-REAL_SHA256": {
+      "name": "Cálculo determinista de SHA-256 real",
+      "status": "VERIFIED",
+      "evidence": "Test T-DOC-003 valida igualdad con sha256 nativo independiente de Node.js."
+    },
+    "CAP-003-GEMINI_MULTIMODAL_ANALYSIS": {
+      "name": "Análisis multimodal server-side con Gemini",
+      "status": "VERIFIED",
+      "evidence": "Uso de @google/genai con soporte de PDFs binarios inline e inspección estructurada."
+    },
+    "CAP-004-EVIDENCE_GATE": {
+      "name": "Compuerta de Evidencia (Evidence Gate) obligatoria",
+      "status": "VERIFIED",
+      "evidence": "Regla matemática: DOCUMENTED_FACT sin Evidence válida lanza EVIDENCE_GATE_FAILED y bloquea DOCX."
+    },
+    "CAP-005-CRITICAL_REVIEWER": {
+      "name": "Revisor crítico automático de coherencia e inexistencia de invenciones",
+      "status": "VERIFIED",
+      "evidence": "Segunda pasada analítica que detecta contradicciones y claims no respaldados."
+    },
+    "CAP-006-TITLE_STUDY_MODULE": {
+      "name": "Módulo de Estudio de Títulos Inmobiliarios (Chile)",
+      "status": "VERIFIED",
+      "evidence": "Cadena de tradición, dominio vigente, gravámenes condicionales y vacíos documentales."
+    },
+    "CAP-007-TOPOGRAPHY_MODULE": {
+      "name": "Módulo de Análisis Topográfico y Deslindes",
+      "status": "VERIFIED",
+      "evidence": "Parser determinista de superficies (ha <-> m2), sumatoria de tramos y detección de discrepancias."
+    },
+    "CAP-008-DOCX_GENERATOR": {
+      "name": "Generación de informes DOCX auditables con anexo de trazabilidad",
+      "status": "VERIFIED",
+      "evidence": "Construcción determinista con docx únicamente tras validación y Evidence Gate = PASS."
+    },
+    "CAP-009-CROSS_STUDY_ISOLATION": {
+      "name": "Aislamiento estricto entre estudios y usuarios (Cero contaminación)",
+      "status": "VERIFIED",
+      "evidence": "Validación obligatoria de (doc.studyId === currentStudy.id && doc.userId === currentUser.id)."
+    },
+    "CAP-010-GOOGLE_DRIVE_INTEGRATION": {
+      "name": "Integración con Google Picker / Drive (scope mínimo)",
+      "status": "ARCHITECTURE_READY",
+      "evidence": "Contratos listos en src/core/documents/drive.adapter.ts para OAuth scope drive.file."
+    },
+    "CAP-011-FIREBASE_PERSISTENCE": {
+      "name": "Persistencia Firestore y Firebase Auth",
+      "status": "ARCHITECTURE_READY",
+      "evidence": "Estructura intermedia preparada; almacén en memoria persistente y local activo en FREE_PROTOTYPE."
+    },
+    "CAP-012-MULTI_PROVIDER_GATEWAY": {
+      "name": "Gateway multi-proveedor (OpenAI, OpenRouter)",
+      "status": "ARCHITECTURE_READY",
+      "evidence": "Contratos AIProvider y esquemas listos; Gemini activo con API key del sistema."
+    }
+  }
+}

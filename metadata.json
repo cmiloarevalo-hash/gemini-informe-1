@@ -1,0 +1,8 @@
+{
+  "name": "Plataforma de Análisis Documental Técnico-Jurídico con IA",
+  "description": "Sistema modular de auditoría y análisis documental técnico-jurídico con IA para Estudios de Títulos y Análisis Topográficos inmobiliarios bajo trazabilidad estricta y Evidence Gate.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
